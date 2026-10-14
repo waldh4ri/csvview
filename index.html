@@ -6,31 +6,31 @@
 <title>CSV Viewer</title>
 <style>
 :root {
-  /* LIGHT = outdoor / direct sunlight: pure white, near-black text, strong contrast and borders */
-  color-scheme: light;
-  --page:#ffffff; --surface:#ffffff; --surface-2:#eceef3; --text:#05070b; --text-2:#242a35; --muted:#4f5668;
-  --grid:#c3c9d4; --axis:#7d869a; --border:rgba(5,7,11,.34); --accent:#0a4fc4; --accent-2:#0a4fc4; --accent-bg:rgba(10,79,196,.14);
-  --sel:rgba(10,79,196,.26); --zebra:rgba(5,7,11,.05); --hover:rgba(10,79,196,.10); --bad:#b3261e;
-  --glow:none; --shadow:0 1px 2px rgba(0,0,0,.18); --head:#e4e7ee; --cell-w:500;
+  color-scheme: light; /* Rosé Pine Dawn */
+  --page:#faf4ed; --surface:#fffaf3; --surface-2:#f2e9e1; --text:#575279; --text-2:#797593; --muted:#9893a5;
+  --grid:#e4dcd6; --axis:#cecacd; --border:rgba(87,82,121,.22); --accent:#286983; --accent-2:#907aa9; --accent-bg:rgba(40,105,131,.14);
+  --sel:rgba(40,105,131,.22); --zebra:rgba(87,82,121,.04); --hover:rgba(144,122,169,.12); --bad:#b4637a; --hl:rgba(234,157,52,.38);
+  --glow:none; --shadow:0 1px 2px rgba(87,82,121,.18); --head:#f2e9e1; --cell-w:500;
   --ui:"Inter","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
   --mono:"JetBrains Mono","Cascadia Mono","Cascadia Code",Consolas,"SF Mono",Menlo,monospace;
 }
-:root[data-theme="dark"] { /* DARK = indoor work: deep ink background, soft contrast, blue-violet accent */
-  color-scheme: dark;
-  --page:#0a0d14; --surface:#10141d; --surface-2:#161b27; --text:#e7eaf3; --text-2:#aab2c8; --muted:#6c7692;
-  --grid:#1b2130; --axis:#2b3449; --border:rgba(140,160,215,.17); --accent:#82a8ff; --accent-2:#b18cff; --accent-bg:rgba(130,168,255,.14);
-  --sel:rgba(130,168,255,.24); --zebra:rgba(255,255,255,.022); --hover:rgba(130,168,255,.08); --bad:#ff7b7b;
-  --glow:0 0 0 1px rgba(130,168,255,.55), 0 0 14px rgba(130,168,255,.28); --shadow:0 6px 24px rgba(0,0,0,.45); --head:#131826; --cell-w:400;
+:root[data-theme="dark"] {
+    color-scheme: dark; /* Rosé Pine */
+    --page:#191724; --surface:#1f1d2e; --surface-2:#26233a; --text:#e0def4; --text-2:#908caa; --muted:#6e6a86;
+    --grid:#2a273f; --axis:#403d52; --border:rgba(144,140,170,.22); --accent:#c4a7e7; --accent-2:#ebbcba; --accent-bg:rgba(196,167,231,.16);
+    --sel:rgba(196,167,231,.24); --zebra:rgba(224,222,244,.025); --hover:rgba(196,167,231,.09); --bad:#eb6f92; --hl:rgba(246,193,119,.34);
+    --glow:0 0 0 1px rgba(196,167,231,.55), 0 0 14px rgba(196,167,231,.25); --shadow:0 6px 24px rgba(0,0,0,.45); --head:#26233a; --cell-w:400;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    color-scheme: dark;
-    --page:#0a0d14; --surface:#10141d; --surface-2:#161b27; --text:#e7eaf3; --text-2:#aab2c8; --muted:#6c7692;
-    --grid:#1b2130; --axis:#2b3449; --border:rgba(140,160,215,.17); --accent:#82a8ff; --accent-2:#b18cff; --accent-bg:rgba(130,168,255,.14);
-    --sel:rgba(130,168,255,.24); --zebra:rgba(255,255,255,.022); --hover:rgba(130,168,255,.08); --bad:#ff7b7b;
-    --glow:0 0 0 1px rgba(130,168,255,.55), 0 0 14px rgba(130,168,255,.28); --shadow:0 6px 24px rgba(0,0,0,.45); --head:#131826; --cell-w:400;
+    color-scheme: dark; /* Rosé Pine */
+    --page:#191724; --surface:#1f1d2e; --surface-2:#26233a; --text:#e0def4; --text-2:#908caa; --muted:#6e6a86;
+    --grid:#2a273f; --axis:#403d52; --border:rgba(144,140,170,.22); --accent:#c4a7e7; --accent-2:#ebbcba; --accent-bg:rgba(196,167,231,.16);
+    --sel:rgba(196,167,231,.24); --zebra:rgba(224,222,244,.025); --hover:rgba(196,167,231,.09); --bad:#eb6f92; --hl:rgba(246,193,119,.34);
+    --glow:0 0 0 1px rgba(196,167,231,.55), 0 0 14px rgba(196,167,231,.25); --shadow:0 6px 24px rgba(0,0,0,.45); --head:#26233a; --cell-w:400;
   }
 }
+mark.hl { background: var(--hl); color: inherit; border-radius: 2px; box-shadow: 0 0 0 1px var(--hl); }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
@@ -829,6 +829,24 @@ function geom() {
 let raf = 0;
 function schedule() { if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(); }); }
 
+let hlKey = "", hlRe = null;
+function hlHtml(v) {
+  const q = $("q").value, key = q + "|" + reOn + "|" + caseOn;
+  if (key !== hlKey) {
+    hlKey = key; hlRe = null;
+    if (q) try { hlRe = new RegExp(reOn ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g" + (caseOn ? "" : "i")); } catch (e) {}
+  }
+  if (!hlRe || !v) return esc(v);
+  hlRe.lastIndex = 0;
+  let out = "", p = 0, m;
+  while ((m = hlRe.exec(v))) {
+    if (!m[0]) { hlRe.lastIndex++; continue; }
+    out += esc(v.slice(p, m.index)) + '<mark class="hl">' + esc(m[0]) + "</mark>";
+    p = m.index + m[0].length;
+  }
+  return p ? out + esc(v.slice(p)) : esc(v);
+}
+
 function render() {
   const t = T;
   if (!t) return;
@@ -852,7 +870,7 @@ function render() {
       let v = cells[c] || "";
       const lim = ROW_H > 26 ? 1200 : 300;
       if (v.length > lim) v = v.slice(0, lim) + "…";
-      html += '<div class="c' + (t.types[c] === "int" || t.types[c] === "float" ? " n" : "") + (sel && sel.vi === vi && sel.c === c ? " sel" : multi && inRow && c >= box.c0 && c <= box.c1 ? " rg" : "") + '" data-c="' + c + '" style="left:' + (GUTTER + t.colX[c] - sl) + "px;width:" + t.widths[c] + 'px">' + esc(v) + "</div>";
+      html += '<div class="c' + (t.types[c] === "int" || t.types[c] === "float" ? " n" : "") + (sel && sel.vi === vi && sel.c === c ? " sel" : multi && inRow && c >= box.c0 && c <= box.c1 ? " rg" : "") + '" data-c="' + c + '" style="left:' + (GUTTER + t.colX[c] - sl) + "px;width:" + t.widths[c] + 'px">' + hlHtml(v) + "</div>";
     }
     html += '<div class="g' + (inRow ? " in" : "") + '">' + fmtN(r + 1) + "</div></div>";
   }
