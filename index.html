@@ -1,0 +1,1483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSV Viewer</title>
+<style>
+:root {
+  /* LIGHT = outdoor / direct sunlight: pure white, near-black text, strong contrast and borders */
+  color-scheme: light;
+  --page:#ffffff; --surface:#ffffff; --surface-2:#eceef3; --text:#05070b; --text-2:#242a35; --muted:#4f5668;
+  --grid:#c3c9d4; --axis:#7d869a; --border:rgba(5,7,11,.34); --accent:#0a4fc4; --accent-2:#0a4fc4; --accent-bg:rgba(10,79,196,.14);
+  --sel:rgba(10,79,196,.26); --zebra:rgba(5,7,11,.05); --hover:rgba(10,79,196,.10); --bad:#b3261e;
+  --glow:none; --shadow:0 1px 2px rgba(0,0,0,.18); --head:#e4e7ee; --cell-w:500;
+  --ui:"Inter","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  --mono:"JetBrains Mono","Cascadia Mono","Cascadia Code",Consolas,"SF Mono",Menlo,monospace;
+}
+:root[data-theme="dark"] { /* DARK = indoor work: deep ink background, soft contrast, blue-violet accent */
+  color-scheme: dark;
+  --page:#0a0d14; --surface:#10141d; --surface-2:#161b27; --text:#e7eaf3; --text-2:#aab2c8; --muted:#6c7692;
+  --grid:#1b2130; --axis:#2b3449; --border:rgba(140,160,215,.17); --accent:#82a8ff; --accent-2:#b18cff; --accent-bg:rgba(130,168,255,.14);
+  --sel:rgba(130,168,255,.24); --zebra:rgba(255,255,255,.022); --hover:rgba(130,168,255,.08); --bad:#ff7b7b;
+  --glow:0 0 0 1px rgba(130,168,255,.55), 0 0 14px rgba(130,168,255,.28); --shadow:0 6px 24px rgba(0,0,0,.45); --head:#131826; --cell-w:400;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    color-scheme: dark;
+    --page:#0a0d14; --surface:#10141d; --surface-2:#161b27; --text:#e7eaf3; --text-2:#aab2c8; --muted:#6c7692;
+    --grid:#1b2130; --axis:#2b3449; --border:rgba(140,160,215,.17); --accent:#82a8ff; --accent-2:#b18cff; --accent-bg:rgba(130,168,255,.14);
+    --sel:rgba(130,168,255,.24); --zebra:rgba(255,255,255,.022); --hover:rgba(130,168,255,.08); --bad:#ff7b7b;
+    --glow:0 0 0 1px rgba(130,168,255,.55), 0 0 14px rgba(130,168,255,.28); --shadow:0 6px 24px rgba(0,0,0,.45); --head:#131826; --cell-w:400;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--page); color: var(--text); font: 13px/1.4 var(--ui); font-feature-settings: "cv11","ss01"; -webkit-font-smoothing: antialiased; overflow: hidden; }
+#app { display: flex; flex-direction: column; height: 100%; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.brand { font-weight: 600; letter-spacing: .2px; margin-right: 4px; }
+.fname { color: var(--text-2); max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp { flex: 1; }
+input[type=search], select, button { font: inherit; color: var(--text); background: var(--page); border: 1px solid var(--border); border-radius: 7px; padding: 5px 9px; }
+input[type=search] { width: min(34vw, 340px); }
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button { cursor: pointer; }
+button:hover { background: var(--hover); }
+button.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+label.chk { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); cursor: pointer; user-select: none; }
+.bad { border-color: var(--bad) !important; }
+#prog { height: 2px; background: transparent; flex: none; }
+#prog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .1s; }
+#work { flex: 1; min-height: 0; display: flex; }
+#main { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; }
+#head { position: relative; height: 70px; flex: none; overflow: hidden; background: var(--surface-2); border-bottom: 1px solid var(--axis); }
+#hg { position: absolute; left: 0; top: 0; width: 60px; height: 100%; z-index: 3; background: var(--surface-2); border-right: 1px solid var(--grid);
+  color: var(--muted); display: flex; align-items: center; justify-content: center; font-size: 11px; }
+#hin { position: absolute; left: 0; top: 0; height: 100%; }
+.hc { position: absolute; top: 0; height: 34px; padding: 0 26px 0 8px; display: flex; align-items: center; gap: 4px; font-weight: 600;
+  border-right: 1px solid var(--grid); cursor: pointer; user-select: none; }
+.hc:hover { background: var(--hover); }
+.hc .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.hc .ar { color: var(--accent); font-size: 10px; }
+.hc .sg { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); line-height: 15px; height: 20px; opacity: 0; border: 0; background: transparent; padding: 1px 4px; border-radius: 6px; color: var(--muted); font-size: 12px; }
+.hc:hover .sg, .hc .sg:focus-visible { opacity: 1; }
+.hc:hover .sg { opacity: 1; }
+.rz { position: absolute; right: -3px; top: 0; width: 7px; height: 100%; cursor: col-resize; z-index: 2; }
+.rz:hover, .rz.drag { background: var(--accent); opacity: .5; }
+.fc { position: absolute; top: 34px; height: 36px; padding: 6px 4px; box-sizing: border-box; border-right: 1px solid var(--grid); }
+.fc { display: flex; gap: 3px; }
+.fc input { flex: 1; min-width: 0; width: auto; height: 24px; padding: 0 6px; font: inherit; font-size: 12px; background: var(--page); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
+.fc input::placeholder { color: var(--muted); }
+#scroller { flex: 1; min-height: 0; overflow: auto; position: relative; outline: none; }
+#scroller:focus, #scroller:focus-visible { outline: none; }
+#spacer { position: relative; }
+#layer { position: sticky; top: 0; left: 0; overflow: hidden; }
+.r { position: absolute; left: 0; right: 0; height: var(--rowh, 26px); border-bottom: 1px solid var(--grid); }
+.r.odd { background: var(--zebra); }
+.r:hover { background: var(--hover); }
+.g { position: absolute; left: 0; top: 0; width: 60px; height: 100%; z-index: 2; background: var(--surface-2); color: var(--muted);
+  font-size: 11px; text-align: right; padding: 0 8px; line-height: 25px; border-right: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+.c { position: absolute; top: 0; height: 100%; padding: 0 8px; line-height: 25px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-right: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+.c.sel { background: var(--sel); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.r.rsel .g { color: var(--accent); font-weight: 600; }
+#empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; }
+#empty .box { max-width: 460px; width: 100%; text-align: center; padding: 44px 24px; border: 2px dashed var(--axis); border-radius: 14px; background: var(--surface); cursor: pointer; }
+#empty .box:hover, body.drag #empty .box { border-color: var(--accent); background: var(--accent-bg); }
+#empty h2 { margin: 0 0 6px; font-size: 18px; }
+#empty p { margin: 4px 0; color: var(--text-2); }
+#nores { position: absolute; left: 60px; right: 0; top: 80px; text-align: center; color: var(--muted); pointer-events: none; }
+#detail { width: 360px; flex: none; border-left: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+#detail[hidden] { display: none; }
+#detail header { padding: 8px 12px; border-bottom: 1px solid var(--border); font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+#dlist { overflow: auto; padding: 4px 0 12px; flex: 1; }
+.kv { padding: 5px 12px; border-bottom: 1px solid var(--grid); cursor: pointer; }
+.kv:hover { background: var(--hover); }
+.kv .k { color: var(--muted); font-size: 11px; }
+.kv .v { font: 12px/1.45 ui-monospace, Consolas, monospace; word-break: break-all; white-space: pre-wrap; max-height: 9em; overflow: auto; }
+.kv.cur { background: var(--accent-bg); }
+#status { flex: none; display: flex; justify-content: space-between; gap: 12px; padding: 4px 12px; background: var(--surface); border-top: 1px solid var(--border); color: var(--text-2); font-size: 12px; }
+#status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 0; width: min(560px, 92vw); max-height: 80vh; overflow: hidden; }
+dialog[open] { display: flex; flex-direction: column; }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+dialog header { flex: none; padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+dialog h3 { margin: 0; font-size: 15px; }
+#dbody { padding: 8px 16px 16px; overflow: auto; flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
+.sr { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 4px 6px; border-radius: 6px; cursor: pointer; position: relative; }
+.sr:hover { background: var(--hover); }
+.sr .val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr .n { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.sr .bar2 { grid-column: 1 / 3; height: 3px; border-radius: 2px; background: var(--accent); opacity: .55; }
+.hint { color: var(--muted); font-size: 12px; margin: 4px 0 8px; }
+.c.n { text-align: right; }
+.ty { font-size: 10px; font-weight: 600; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; line-height: 15px; cursor: pointer; }
+.ty:hover { color: var(--accent); border-color: var(--accent); }
+.fc .vp { width: 24px; height: 24px; padding: 0; font-size: 11px; line-height: 1; color: var(--text-2); }
+.fc .vp.set { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.fc input.set { border-color: var(--accent); background: var(--accent-bg); }
+.fc input.set::placeholder { color: var(--accent); }
+.kv .u { color: var(--accent); font: 11px ui-monospace, Consolas, monospace; margin-top: 2px; }
+.ctl { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+.ctl input[type=search] { flex: 1; min-width: 140px; width: auto; }
+.sum { display: grid; grid-template-columns: auto 1fr; gap: 1px 12px; font-size: 12px; margin: 6px 0 4px; color: var(--text-2); }
+.sum b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.sr input { margin-right: 6px; }
+.sr { grid-template-columns: 1fr auto; }
+label.sr { align-items: center; }
+#toast { position: fixed; bottom: 34px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--page); padding: 6px 12px; border-radius: 8px;
+  font-size: 12px; opacity: 0; transition: opacity .15s; pointer-events: none; z-index: 10; }
+#toast.show { opacity: 1; }
+@media (max-width: 720px) { #detail { position: absolute; right: 0; top: 0; bottom: 0; z-index: 5; width: min(360px, 90vw); } .fname { display: none; } }
+
+/* ---- time range ---- */
+#trange { flex: none; background: var(--surface); border-bottom: 1px solid var(--border); padding: 8px 12px 8px; display: flex; flex-direction: column; gap: 6px; }
+.trrow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.trrow label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
+.trrow button { padding: 3px 9px; }
+.trrow .tz { color: var(--muted); font-size: 11px; }
+.tin { width: 172px; font: 12px var(--mono); background: var(--page); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; }
+.tin:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.chips { display: inline-flex; gap: 4px; }
+#trcv { width: 100%; height: 78px; display: block; touch-action: none; cursor: crosshair; border-radius: 8px; background: var(--page); border: 1px solid var(--border); }
+#trinfo { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* ---- multi-cell selection ---- */
+#layer { user-select: none; -webkit-user-select: none; }
+.c.rg { background: var(--sel); }
+.g.in { color: var(--accent); font-weight: 600; }
+#st2 { display: inline-flex; align-items: center; gap: 8px; }
+#st2 button { padding: 0 8px; font-size: 11px; line-height: 18px; border-radius: 6px; }
+/* ---- wrap mode ---- */
+#layer.wrap .c { line-height: 18px; padding: 4px 8px; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--lines, 4); line-clamp: var(--lines, 4); overflow: hidden; text-overflow: clip; }
+#layer.wrap .g { line-height: 18px; padding-top: 4px; }
+/* ---- polish ---- */
+html { scrollbar-color: var(--axis) transparent; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-thumb { background: var(--axis); border-radius: 8px; border: 3px solid var(--page); }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+::-webkit-scrollbar-corner { background: transparent; }
+::selection { background: var(--accent-bg); }
+.bar { box-shadow: var(--shadow); position: relative; z-index: 4; gap: 8px; }
+.brand { font-weight: 700; letter-spacing: .3px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+input[type=search], select, button { border-radius: 9px; transition: background .12s, border-color .12s, box-shadow .12s; }
+input[type=search]:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+button:active { transform: translateY(1px); }
+button.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+#prog i { background: linear-gradient(90deg, var(--accent), var(--accent-2)); box-shadow: 0 0 10px var(--accent); }
+#head { background: var(--head); }
+#hg { background: var(--head); }
+.hc { letter-spacing: .1px; }
+.hc .nm { font-weight: 600; }
+.c, .g { font-family: var(--mono); font-size: 12.5px; font-weight: var(--cell-w); }
+.g { font-size: 11px; }
+.c.sel { box-shadow: var(--glow), inset 0 0 0 1.5px var(--accent); background: var(--sel); border-radius: 3px; }
+.kv .v, .sum b { font-family: var(--mono); }
+#detail, dialog { box-shadow: var(--shadow); }
+dialog { border-radius: 14px; }
+#empty .box { background: linear-gradient(160deg, var(--surface), var(--surface-2)); border-radius: 18px; box-shadow: var(--shadow); }
+#empty h2 { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 22px; }
+#toast { box-shadow: var(--shadow); }
+#bthm { min-width: 84px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="bar">
+    <span class="brand">CSV Viewer</span><span class="fname" id="fname"></span>
+    <input type="search" id="q" placeholder="Search all columns  ( / )" aria-label="Search all columns" disabled>
+    <button id="bre" title="Regular expression" disabled>.*</button>
+    <button id="bcase" title="Match case" disabled>Aa</button>
+    <label class="chk"><input type="checkbox" id="hdr" checked disabled> Header</label>
+    <select id="dsel" title="Delimiter" disabled>
+      <option value="">Auto</option><option value=",">Comma</option><option value=";">Semicolon</option>
+      <option value="&#9;">Tab</option><option value="|">Pipe</option>
+    </select>
+    <span class="sp"></span>
+    <button id="btr" disabled title="Select a time range on a timestamp column">Time range</button>
+    <button id="bwrap" disabled title="Wrap long values over several lines instead of cutting them off">Wrap</button>
+    <button id="bcols" disabled title="Choose which columns to show / export">Columns</button>
+    <button id="bdet" disabled>Details</button>
+    <button id="bexp" disabled>Export view</button>
+    <button id="bthm" title="Toggle theme">Theme</button>
+    <button id="bopen">Open…</button>
+    <input type="file" id="file" accept=".csv,.tsv,.txt,.tab,.log,text/*" hidden>
+  </div>
+  <div id="prog"><i></i></div>
+  <section id="trange" hidden aria-label="Time range">
+    <div class="trrow">
+      <strong>Time range</strong>
+      <select id="trcol" aria-label="Timestamp column"></select>
+      <label>From <input id="trfrom" class="tin" placeholder="YYYY-MM-DD HH:mm:ss" spellcheck="false" autocomplete="off"></label>
+      <label>To <input id="trto" class="tin" placeholder="YYYY-MM-DD HH:mm:ss" spellcheck="false" autocomplete="off"></label>
+      <span class="tz">UTC</span>
+      <span class="chips" id="trchips" title="Relative to the last timestamp of the data">
+        <button data-p="3600000">1 h</button><button data-p="21600000">6 h</button><button data-p="86400000">24 h</button><button data-p="604800000">7 d</button>
+      </span>
+      <button id="trprev" title="Previous window of the same length">◀</button><button id="trnext" title="Next window of the same length">▶</button>
+      <button id="trzin" title="Zoom the chart to the selected range">Zoom to selection</button><button id="trzout">Full range</button>
+      <span class="sp"></span><span id="trinfo"></span>
+      <button id="trclear" title="Remove the time filter">Clear</button><button id="trx" aria-label="Close time range">✕</button>
+    </div>
+    <canvas id="trcv" aria-label="Rows over time: drag to select a range, drag its edges or body to adjust, click to clear"></canvas>
+  </section>
+  <div id="work">
+    <div id="main">
+      <div id="head" hidden><div id="hg">#</div><div id="hin"></div></div>
+      <div id="scroller" tabindex="0" hidden><div id="spacer"><div id="layer"></div></div><div id="nores" hidden>No matching rows</div></div>
+      <div id="empty"><div class="box" id="drop">
+        <h2>Drop a CSV / TSV file here</h2>
+        <p>or click to open · or paste text (Ctrl+V)</p>
+        <p style="font-size:12px;color:var(--muted)">Everything stays in your browser, nothing is uploaded.<br>
+        Millions of rows: sorting, search, per-column filters.</p>
+      </div></div>
+    </div>
+    <aside id="detail" hidden><header><span id="dtitle">Row</span><button id="dclose" aria-label="Close">✕</button></header><div id="dlist"></div></aside>
+  </div>
+  <div id="status"><span id="st1">Ready</span><span id="st2"></span></div>
+</div>
+<dialog id="dlg"><header><h3 id="dh"></h3><button id="dx">Close</button></header><div id="dbody"></div></dialog>
+<div id="toast"></div>
+<script>
+"use strict";
+let ROW_H = 26;                       // 26 px, or 80 px when "Wrap" is on (4 lines)
+const GUTTER = 60, MAXH = 8e6, WRAP_LINES = 4, WRAP_ROW_H = WRAP_LINES * 18 + 8;
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const fmtN = n => n.toLocaleString("en-US");
+const fmtB = b => b < 1024 ? b + " B" : b < 1048576 ? (b / 1024).toFixed(1) + " KB" : b < 1073741824 ? (b / 1048576).toFixed(1) + " MB" : (b / 1073741824).toFixed(2) + " GB";
+const tick = () => new Promise(r => setTimeout(r, 0));
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+
+let T = null;          // loaded dataset
+let loadGen = 0, gen = 0;
+let reOn = false, caseOn = false;
+
+// ---------------------------------------------------------------- csv parsing
+function parseRow(s, d) {
+  if (s.indexOf('"') < 0) return s.split(d);
+  const out = [], L = s.length;
+  let i = 0;
+  while (i <= L) {
+    if (s.charCodeAt(i) === 34) {
+      let j = i + 1, buf = "";
+      for (;;) {
+        const k = s.indexOf('"', j);
+        if (k < 0) { buf += s.slice(j); i = L; break; }
+        if (s.charCodeAt(k + 1) === 34) { buf += s.slice(j, k + 1); j = k + 2; continue; }
+        buf += s.slice(j, k); i = k + 1; break;
+      }
+      const k2 = s.indexOf(d, i);
+      if (k2 < 0) { out.push(buf + s.slice(i)); return out; }
+      out.push(buf + s.slice(i, k2)); i = k2 + 1;
+      if (i === L) { out.push(""); return out; }
+    } else {
+      const k = s.indexOf(d, i);
+      if (k < 0) { out.push(s.slice(i)); return out; }
+      out.push(s.slice(i, k)); i = k + 1;
+      if (i === L) { out.push(""); return out; }
+    }
+  }
+  return out;
+}
+
+function setProg(f, label) {
+  $("prog").firstElementChild.style.width = f == null ? "0" : Math.round(f * 100) + "%";
+  if (label) $("st1").textContent = label;
+}
+
+async function indexRecords(text, isCurrent) {
+  let cap = 1 << 20, st = new Float64Array(cap), en = new Float64Array(cap), n = 0;
+  const L = text.length;
+  let i = 0, start = 0, inQ = false;
+  const push = (a, b) => {
+    if (b <= a) return;
+    if (n === cap) {
+      cap *= 2;
+      const s2 = new Float64Array(cap), e2 = new Float64Array(cap);
+      s2.set(st); e2.set(en); st = s2; en = e2;
+    }
+    st[n] = a; en[n] = b; n++;
+  };
+  while (i < L) {
+    const lim = Math.min(L, i + 4000000);
+    for (; i < lim; i++) {
+      const c = text.charCodeAt(i);
+      if (c === 34) inQ = !inQ;
+      else if (c === 10 && !inQ) {
+        let e = i;
+        if (e > start && text.charCodeAt(e - 1) === 13) e--;
+        push(start, e); start = i + 1;
+      }
+    }
+    setProg(0.4 + 0.6 * i / L, "Indexing… " + fmtN(n) + " rows");
+    await tick();
+    if (!isCurrent()) return null;
+  }
+  if (start < L) { let e = L; if (text.charCodeAt(e - 1) === 13) e--; push(start, e); }
+  return {st: st.subarray(0, n), en: en.subarray(0, n), n};
+}
+
+function detectDelim(t) {
+  let best = ",", bestScore = -1;
+  for (const d of [",", ";", "\t", "|"]) {
+    const cnt = [];
+    for (let r = 0; r < Math.min(10, t.nRec); r++) cnt.push(parseRow(t.text.slice(t.st[r], t.en[r]), d).length);
+    const first = cnt[0];
+    if (first < 2) continue;
+    const score = first * (cnt.every(x => x === first) ? 1000 : 1) * (cnt.filter(x => x === first).length);
+    if (score > bestScore) { bestScore = score; best = d; }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------- dataset
+const nData = t => t.nRec - t.base;
+const recStr = r => T.text.slice(T.st[r + T.base], T.en[r + T.base]);
+const rowCells = r => parseRow(recStr(r), T.delim);
+const rowAt = vi => T.view ? T.view[vi] : vi;
+
+async function loadText(text, name, size) {
+  const g = ++loadGen;
+  gen++;
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  setProg(0.4, "Indexing…");
+  const ix = await indexRecords(text, () => g === loadGen);
+  if (!ix) return;
+  if (!ix.n) { setProg(null, "The file is empty"); return; }
+  T = {name, size, text, st: ix.st, en: ix.en, nRec: ix.n, base: 1, delim: ",", cols: [], nc: 0, widths: [], colX: [], totalW: 0,
+       colCache: new Map(), typed: new Map(), types: [], dmy: [], sets: [], hidden: [], tr: null, sort: null, filters: [], order: null, orderKey: "", view: null, nView: 0, sel: null};
+  $("fname").textContent = name;
+  $("fname").title = name;
+  $("hdr").checked = true; $("dsel").value = ""; $("q").value = "";
+  for (const id of ["q", "bre", "bcase", "hdr", "dsel", "btr", "bwrap", "bcols", "bdet", "bexp"]) $(id).disabled = false;
+  $("empty").hidden = true; $("head").hidden = false; $("scroller").hidden = false;
+  configure();
+  setProg(null);
+  $("scroller").focus();
+}
+
+const openFile = file => readStream(file.stream(), file.size, file.name);
+async function readStream(body, size, name) {
+  const g = ++loadGen;
+  setProg(0.01, "Reading " + name + "…");
+  const reader = body.getReader(), dec = new TextDecoder("utf-8");
+  const parts = []; let got = 0;
+  for (;;) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    parts.push(dec.decode(value, {stream: true}));
+    got += value.length;
+    setProg(size ? 0.4 * got / size : 0.2, "Reading " + name + "… " + fmtB(got));
+    if (g !== loadGen) { reader.cancel(); return; }
+  }
+  parts.push(dec.decode());
+  let text;
+  try { text = parts.join(""); }
+  catch (e) { setProg(null, "File too large for the browser (about 500 MB of text). Split it first (e.g. split -l) or use a desktop tool."); return; }
+  await loadText(text, name, size || got);
+}
+
+function configure() {
+  const t = T;
+  t.base = $("hdr").checked ? 1 : 0;
+  if (t.nRec - t.base < 1 && t.base) t.base = 0;
+  const dsel = $("dsel").value;
+  t.delim = dsel || detectDelim(t);
+  let nc = 0;
+  const lim = Math.min(t.nRec, 500);
+  for (let r = 0; r < lim; r++) nc = Math.max(nc, parseRow(t.text.slice(t.st[r], t.en[r]), t.delim).length);
+  t.nc = nc;
+  const head = t.base ? parseRow(t.text.slice(t.st[0], t.en[0]), t.delim) : [];
+  t.cols = Array.from({length: nc}, (_, c) => (head[c] || "").trim() || "col " + (c + 1));
+  // widths from header + first rows
+  const mx = t.cols.map(n => n.length + 7);
+  for (let r = 0; r < Math.min(nData(t), 200); r++) {
+    const cells = parseRow(t.text.slice(t.st[r + t.base], t.en[r + t.base]), t.delim);
+    for (let c = 0; c < nc; c++) { const l = (cells[c] || "").length; if (l > mx[c]) mx[c] = l; }
+  }
+  t.widths = mx.map(l => Math.max(96, Math.min(420, Math.round(l * 7.2 + 28))));
+  t.colCache = new Map(); t.typed = new Map(); t.sort = null; t.filters = new Array(nc).fill(""); t.sets = new Array(nc).fill(null); t.hidden = new Array(nc).fill(false); t.tr = null;
+  t.order = null; t.orderKey = ""; t.sel = null;
+  // type inference on a sample (first rows + evenly spaced rows)
+  const nD = nData(t), samples = Array.from({length: nc}, () => []);
+  const step = Math.max(1, Math.floor(nD / 1500));
+  for (let r = 0; r < nD; r += (r < 500 ? 1 : step)) {
+    const cells = parseRow(t.text.slice(t.st[r + t.base], t.en[r + t.base]), t.delim);
+    for (let c = 0; c < nc; c++) samples[c].push(cells[c] || "");
+  }
+  t.types = []; t.dmy = [];
+  for (let c = 0; c < nc; c++) { const ty = inferType(t.cols[c], samples[c], t.delim !== ","); t.types[c] = ty.type; t.dmy[c] = ty.dmy !== false; }
+  $("dlist").textContent = "";
+  buildHeader();
+  trOnLoad();
+  refresh();
+}
+
+// ---------------------------------------------------------------- header
+function buildHeader() {
+  const t = T, hin = $("hin");
+  hin.textContent = "";
+  t.cols.forEach((name, c) => {
+    const h = document.createElement("div");
+    h.className = "hc"; h.dataset.c = c; h.title = name;
+    h.innerHTML = '<span class="nm">' + esc(name) + '</span><span class="ar"></span><span class="ty" data-c="' + c + '"></span><button class="sg" title="Column statistics (top values)" aria-label="Statistics">Σ</button><span class="rz" data-c="' + c + '"></span>';
+    hin.appendChild(h);
+    const f = document.createElement("div");
+    f.className = "fc"; f.dataset.c = c;
+    f.innerHTML = '<input type="text" placeholder="filter" spellcheck="false" aria-label="Filter ' + esc(name) + '" title="text · =exact · !not · &gt;5 · &gt;=2026-09-28 · 10..20 · 2026-09-28..2026-09-30 · /regex/ · = (empty) · ! (non-empty)"><button class="vp" title="Pick the values to keep (checkbox list)" aria-label="Pick values">☰</button>';
+    hin.appendChild(f);
+  });
+  layoutHeader();
+}
+function layoutCols() {
+  const t = T; let x = 0;
+  t.colX = t.widths.map((w, c) => { const p = x; if (!t.hidden[c]) x += w; return p; });
+  t.totalW = GUTTER + x;
+}
+function layoutHeader() {
+  const t = T; layoutCols();
+  const kids = $("hin").children;
+  for (let c = 0; c < t.nc; c++) {
+    const h = kids[c * 2], f = kids[c * 2 + 1];
+    h.style.display = f.style.display = t.hidden[c] ? "none" : "";
+    h.style.left = f.style.left = GUTTER + t.colX[c] + "px";
+    h.style.width = f.style.width = t.widths[c] + "px";
+    h.querySelector(".ar").textContent = t.sort && t.sort.c === c ? (t.sort.dir > 0 ? "▲" : "▼") : "";
+    const ty = h.querySelector(".ty");
+    ty.textContent = TYPE_LABEL[t.types[c]];
+    ty.title = "Detected as " + TYPE_NAME[t.types[c]] + " (click to change the type)";
+  }
+  $("hin").style.width = t.totalW + "px";
+  syncHead();
+  if (wrapOn && t.nView) fitRows();
+}
+function syncHead() { $("hin").style.transform = "translateX(" + (-$("scroller").scrollLeft) + "px)"; }
+
+let drag = null;
+$("hin").addEventListener("pointerdown", e => {
+  const rz = e.target.closest(".rz");
+  if (!rz) return;
+  e.preventDefault(); e.stopPropagation();
+  rz.setPointerCapture(e.pointerId); rz.classList.add("drag");
+  drag = {c: +rz.dataset.c, x: e.clientX, w: T.widths[+rz.dataset.c], el: rz};
+});
+$("hin").addEventListener("pointermove", e => {
+  if (!drag) return;
+  T.widths[drag.c] = Math.max(40, Math.min(2000, drag.w + e.clientX - drag.x));
+  layoutHeader(); render();
+});
+const endDrag = () => { if (drag) { drag.el.classList.remove("drag"); drag = null; } };
+$("hin").addEventListener("pointerup", endDrag);
+$("hin").addEventListener("pointercancel", endDrag);
+$("hin").addEventListener("dblclick", e => {
+  const rz = e.target.closest(".rz");
+  if (!rz) return;
+  const c = +rz.dataset.c; let m = T.cols[c].length + 3;
+  for (let i = 0; i < Math.min(T.nView, 300); i++) { const v = rowCells(rowAt(i))[c] || ""; if (v.length > m) m = v.length; }
+  T.widths[c] = Math.max(70, Math.min(700, Math.round(m * 7.2 + 28)));
+  layoutHeader(); render();
+});
+$("hin").addEventListener("click", e => {
+  const vp = e.target.closest(".vp");
+  if (vp) { showStats(+vp.closest(".fc").dataset.c); return; }
+  if (e.target.closest(".rz") || e.target.closest(".fc")) return;
+  const ty = e.target.closest(".ty");
+  if (ty) {
+    const c = +ty.dataset.c;
+    T.types[c] = TYPE_CYCLE[(TYPE_CYCLE.indexOf(T.types[c]) + 1) % TYPE_CYCLE.length];
+    T.typed.delete(c);
+    if (T.sort && T.sort.c === c) T.orderKey = "?";
+    layoutHeader(); trTypeChanged(c); refresh(); return;
+  }
+  const sg = e.target.closest(".sg");
+  const h = e.target.closest(".hc");
+  if (!h) return;
+  const c = +h.dataset.c;
+  if (sg) { showStats(c); return; }
+  const s = T.sort;
+  T.sort = !s || s.c !== c ? {c, dir: 1} : s.dir > 0 ? {c, dir: -1} : null;
+  layoutHeader(); refresh();
+});
+$("hin").addEventListener("contextmenu", e => {
+  const h = e.target.closest(".hc");
+  if (h) { e.preventDefault(); showStats(+h.dataset.c); }
+});
+let ftimer = 0;
+$("hin").addEventListener("input", e => {
+  const f = e.target.closest(".fc");
+  if (!f) return;
+  T.filters[+f.dataset.c] = e.target.value;
+  clearTimeout(ftimer); ftimer = setTimeout(() => refresh(), 220);
+});
+
+// ---------------------------------------------------------------- filtering / sorting pipeline
+// ---------------------------------------------------------------- typing: integer / float / timestamp
+const RE_INT = /^[+-]?(0|[1-9]\d{0,17})$/;
+const RE_FLOAT = /^[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?$/;
+const RE_ISO = /^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?\s*(Z|UTC|[+-]\d{2}:?\d{2})?)?$/i;
+const RE_DMY = /^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?\s*(AM|PM)?\s*(Z|UTC|[+-]\d{2}:?\d{2})?)?$/i;
+const TYPE_LABEL = {int: "123", float: "1.5", time: "ts", epoch: "ep", str: "abc"};
+const TYPE_NAME = {int: "integer", float: "decimal number", time: "timestamp", epoch: "epoch timestamp (s / ms / µs / ns since 1970)", str: "text"};
+const TYPE_CYCLE = ["int", "float", "time", "epoch", "str"];
+
+function tzOff(z) {
+  if (!z || /^(Z|UTC)$/i.test(z)) return 0;
+  const m = /^([+-])(\d{2}):?(\d{2})$/.exec(z);
+  return (m[1] === "-" ? -1 : 1) * (+m[2] * 60 + +m[3]) * 60000;
+}
+// -> {ms, span} (UTC epoch ms, and the width of the precision given: a bare date spans a whole day) or null. No timezone = UTC.
+function parseTsFull(s, dmy) {
+  s = s.trim();
+  let m, y, mo, d, H = 0, Mi = 0, S = 0, f = 0, z, span = 86400000, ap, hasT;
+  if ((m = RE_ISO.exec(s))) { y = +m[1]; mo = +m[2]; d = +m[3]; hasT = m[4]; z = m[8]; }
+  else if ((m = RE_DMY.exec(s))) {
+    const a = +m[1], b = +m[2]; y = +m[3];
+    if (dmy) { d = a; mo = b; } else { mo = a; d = b; }
+    hasT = m[4]; z = m[9]; ap = m[8];
+  } else return null;
+  if (hasT !== undefined) {
+    H = +hasT; Mi = +m[5]; span = 60000;
+    if (m[6] !== undefined) {
+      S = +m[6]; span = 1000;
+      if (m[7]) { f = parseFloat("0." + m[7]) * 1000; span = Math.pow(10, 3 - Math.min(3, m[7].length)); }
+    }
+    if (ap) { if (H < 1 || H > 12) return null; H = H % 12 + (/pm/i.test(ap) ? 12 : 0); }
+  }
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || H > 23 || Mi > 59 || S > 60) return null;
+  const base = Date.UTC(y, mo - 1, d, H, Mi, S);
+  if (new Date(base).getUTCDate() !== d) return null;
+  return {ms: base + f - tzOff(z), span};
+}
+function parseNum(v, decComma) {
+  v = v.trim();
+  if (decComma && v.indexOf(",") >= 0 && v.indexOf(".") < 0) v = v.replace(",", ".");
+  if (/^[+-]?0\d/.test(v) || !RE_FLOAT.test(v)) return NaN;
+  return parseFloat(v);
+}
+function parseEpoch(v) {
+  if (!RE_INT.test(v.trim())) return NaN;
+  const n = Number(v);
+  if (n >= 1e9 && n < 1e11) return n * 1000;              // seconds
+  if (n >= 1e11 && n < 1e14) return n;                    // milliseconds
+  if (n >= 1e14 && n < 1e17) return n / 1000;             // microseconds
+  if (n >= 1e17 && n < 1e20) return n / 1e6;              // nanoseconds
+  return NaN;
+}
+// typed value of a cell (ms since epoch for time/epoch), NaN when it does not parse
+function typedValue(type, v, c) {
+  switch (type) {
+    case "int": case "float": return parseNum(v, T.delim !== ",");
+    case "epoch": return parseEpoch(v);
+    case "time": { const r = parseTsFull(v, T.dmy[c]); return r ? r.ms : NaN; }
+    default: return NaN;
+  }
+}
+function fmtTs(ms) { return ms === ms && Math.abs(ms) < 2.5e14 ? new Date(ms).toISOString().replace("T", " ") : ""; }
+function inferType(name, samples, decComma) {
+  const vs = samples.map(x => x.trim()).filter(x => x !== "");
+  if (!vs.length) return {type: "str"};
+  const frac = f => { let k = 0; for (const v of vs) if (f(v)) k++; return k / vs.length; };
+  if (frac(v => RE_INT.test(v)) >= 0.95) {
+    if (/time|date|epoch|stamp|created|modified|accessed|^ts$|_ts$|_at$|^when/i.test(name) && frac(v => parseEpoch(v) === parseEpoch(v)) >= 0.95) return {type: "epoch"};
+    return {type: "int"};
+  }
+  let dmy = true, sawA = false, sawB = false;
+  for (const v of vs) { const m = RE_DMY.exec(v); if (m) { if (+m[1] > 12) sawA = true; if (+m[2] > 12) sawB = true; } }
+  if (!sawA && sawB) dmy = false;
+  if (frac(v => parseTsFull(v, dmy) !== null) >= 0.95) return {type: "time", dmy};
+  if (frac(v => parseNum(v, decComma) === parseNum(v, decComma)) >= 0.95) return {type: "float"};
+  return {type: "str"};
+}
+async function typedColumn(c, g) {
+  const t = T, type = t.types[c];
+  if (type === "str") return null;
+  if (t.typed.has(c)) return t.typed.get(c);
+  const vals = await colValues(c, g);
+  if (!vals) return null;
+  const out = new Float64Array(vals.length);
+  let last = performance.now();
+  for (let i = 0; i < vals.length; i++) {
+    out[i] = typedValue(type, vals[i], c);
+    if ((i & 4095) === 0 && performance.now() - last > 30) {
+      setProg(i / vals.length, "Parsing " + TYPE_NAME[type] + " column “" + t.cols[c] + "”…");
+      await tick(); last = performance.now();
+      if (T !== t || (g != null && g !== gen)) return null;
+    }
+  }
+  t.typed.set(c, out);
+  return out;
+}
+
+// ---------------------------------------------------------------- column filter language
+//   text            contains (case-insensitive)      !text      does not contain
+//   =x   !=x        equals / differs                 =  !       empty / non-empty
+//   >5 >=5 <5 <=5   numbers; for timestamps: >2026-09-28  <=2026-09-28 10:30   (bare date = whole day)
+//   a..b            range (numbers or timestamps, inclusive)
+//   /regex/i        regular expression
+function makePred(f, c) {
+  const t = T, type = t.types[c], numeric = type !== "str";
+  f = f.trim();
+  let neg = false;
+  if (f[0] === "!") { neg = true; f = f.slice(1); }
+  const bound = x => {
+    x = x.trim();
+    if (type === "int" || type === "float") { const v = parseNum(x, t.delim !== ","); return v === v ? {v, span: 0} : null; }
+    if (type === "time" || type === "epoch") {
+      const r = parseTsFull(x, t.dmy[c]);
+      if (r) return {v: r.ms, span: r.span};
+      const e = type === "epoch" ? parseEpoch(x) : NaN;
+      return e === e ? {v: e, span: 0} : null;
+    }
+    return null;
+  };
+  let p, m;
+  if (f === "") p = (v) => v === "";
+  else if (f.length > 2 && f[0] === "/" && f.lastIndexOf("/") > 0) {
+    const li = f.lastIndexOf("/");
+    const re = new RegExp(f.slice(1, li), (f.slice(li + 1) || "i").replace(/g/g, ""));
+    p = v => re.test(v);
+  } else if (numeric && (m = /^(.+?)\.\.(.+)$/.exec(f)) && bound(m[1]) && bound(m[2])) {
+    const lo = bound(m[1]), hi = bound(m[2]), top = hi.v + hi.span;
+    p = (v, x) => x === x && x >= lo.v && (hi.span ? x < top : x <= hi.v);
+  } else if ((m = /^(>=|<=|>|<|=)\s*(.*)$/.exec(f))) {
+    const op = m[1], rhs = m[2], b = numeric && rhs !== "" ? bound(rhs) : null;
+    if (b) {
+      const a = b.v, e = b.v + b.span;
+      p = op === "=" ? (b.span ? (v, x) => x >= a && x < e : (v, x) => x === a)
+        : op === ">" ? (b.span ? (v, x) => x >= e : (v, x) => x > a)
+        : op === ">=" ? (v, x) => x >= a
+        : op === "<" ? (v, x) => x < a
+        : (b.span ? (v, x) => x < e : (v, x) => x <= a);
+    } else if (op === "=") { const x = rhs.toLowerCase(); p = v => v.toLowerCase() === x; }
+    else {
+      const cmp = (a, b2) => op === ">" ? a > b2 : op === "<" ? a < b2 : op === ">=" ? a >= b2 : a <= b2;
+      p = v => v !== "" && cmp(v, rhs);
+    }
+  } else { const x = f.toLowerCase(); p = v => v.toLowerCase().includes(x); }
+  return neg ? (v, x) => !p(v, x) : p;
+}
+
+async function colValues(c, g) {
+  const t = T;
+  if (t.colCache.has(c)) return t.colCache.get(c);
+  const n = nData(t), d = t.delim, out = new Array(n);
+  let last = performance.now();
+  for (let r = 0; r < n; r++) {
+    const s = t.text.slice(t.st[r + t.base], t.en[r + t.base]);
+    out[r] = (s.indexOf('"') < 0 ? s.split(d)[c] : parseRow(s, d)[c]) ?? "";
+    if ((r & 1023) === 0 && performance.now() - last > 30) {
+      setProg(r / n, "Reading column “" + t.cols[c] + "”…");
+      await tick(); last = performance.now();
+      if (T !== t || (g != null && g !== gen)) return null;
+    }
+  }
+  t.colCache.set(c, out);
+  return out;
+}
+
+async function buildOrder(g) {
+  const t = T, s = t.sort;
+  if (!s) return null;
+  const vals = await colValues(s.c, g);
+  if (!vals) return undefined;
+  const n = vals.length, dir = s.dir;
+  const order = new Uint32Array(n);
+  for (let i = 0; i < n; i++) order[i] = i;
+  setProg(0.9, "Sorting…"); await tick();
+  if (t.types[s.c] !== "str") {
+    const nums = await typedColumn(s.c, g);
+    if (!nums) return undefined;
+    order.sort((a, b) => {
+      const x = nums[a], y = nums[b], nx = x !== x, ny = y !== y;
+      if (nx || ny) return nx === ny ? 0 : nx ? 1 : -1;      // unparsable / empty always last
+      return x < y ? -dir : x > y ? dir : 0;
+    });
+  } else {
+    order.sort((a, b) => {
+      const x = vals[a], y = vals[b];
+      if (x === y) return 0;
+      if (x === "") return 1;
+      if (y === "") return -1;
+      return x < y ? -dir : dir;
+    });
+  }
+  return order;
+}
+
+async function searchMask(q, g) {
+  const t = T, n = nData(t), mask = new Uint8Array(n);
+  let re;
+  try { re = new RegExp(reOn ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g" + (caseOn ? "" : "i")); $("q").classList.remove("bad"); }
+  catch (e) { $("q").classList.add("bad"); return mask; }
+  const CH = 20000, {st, en, base, text} = t;
+  let last = performance.now();
+  for (let a = 0; a < n; a += CH) {
+    const b = Math.min(n, a + CH), o = st[a + base], s = text.slice(o, en[b - 1 + base]);
+    re.lastIndex = 0;
+    let p = a, m;
+    while ((m = re.exec(s))) {
+      const pos = o + m.index;
+      while (p < b - 1 && en[p + base] < pos) p++;
+      mask[p] = 1;
+      re.lastIndex = Math.max(m.index + 1, en[p + base] - o + 1);
+      if (re.lastIndex > s.length) break;
+    }
+    if (performance.now() - last > 30) {
+      setProg(a / n, "Searching… " + Math.round(100 * a / n) + "%");
+      await tick(); last = performance.now();
+      if (T !== t || (g != null && g !== gen)) return null;
+    }
+  }
+  return mask;
+}
+
+// Active filters as [column, predicate, needsTypedValue]. `exclude` leaves out one column's own filters (value picker context);
+// with exclude < 0 it also refreshes the filter boxes (set indicator, invalid regex).
+function activeFilters(exclude) {
+  const t = T, flt = [], ui = exclude < 0;
+  for (let c = 0; c < t.nc; c++) {
+    const inp = $("hin").children[c * 2 + 1].firstElementChild, set = t.sets[c];
+    if (ui) {
+      inp.classList.toggle("set", !!set);
+      const vb = inp.nextElementSibling; vb.classList.toggle("set", !!set); vb.textContent = set ? set.size : "☰";
+      inp.placeholder = set ? "● " + set.size + " value" + (set.size > 1 ? "s" : "") : "filter";
+    }
+    if (c === exclude) continue;
+    if (set) flt.push([c, (v) => set.has(v), false]);
+    if (t.filters[c]) {
+      try { flt.push([c, makePred(t.filters[c], c), t.types[c] !== "str"]); if (ui) inp.classList.remove("bad"); } catch (e) { if (ui) inp.classList.add("bad"); }
+    } else if (ui) inp.classList.remove("bad");
+  }
+  if (t.tr && t.tr.c !== exclude) { const {c, lo, hi} = t.tr; flt.push([c, (v, x) => x >= lo && x <= hi, true]); }
+  return flt;
+}
+// -> {mask} (Uint8Array of data records passing everything, or null = all rows) or undefined when superseded.
+// g = refresh generation (null: not cancellable, used by dialogs).
+async function buildMask(g, exclude) {
+  const t = T, n = nData(t);
+  const dead = () => T !== t || (g != null && g !== gen);
+  const flt = activeFilters(exclude);
+  let mask = null;
+  const q = $("q").value;
+  if (q) { mask = await searchMask(q, g); if (!mask || dead()) return undefined; } else if (exclude < 0) $("q").classList.remove("bad");
+  for (const [c, p, wantTyped] of flt) {
+    const vals = await colValues(c, g);
+    if (!vals || dead()) return undefined;
+    const typed = wantTyped ? await typedColumn(c, g) : null;
+    if (wantTyped && (!typed || dead())) return undefined;
+    if (!mask) mask = new Uint8Array(n).fill(1);
+    for (let i = 0; i < n; i++) if (mask[i] && !p(vals[i], typed ? typed[i] : NaN)) mask[i] = 0;
+  }
+  return {mask};
+}
+
+async function refresh() {
+  const g = ++gen, t = T;
+  if (!t) return;
+  const n = nData(t);
+  const key = t.sort ? t.sort.c + ":" + t.sort.dir : "";
+  if (t.orderKey !== key) {
+    const o = await buildOrder(g);
+    if (o === undefined || g !== gen || T !== t) return;
+    t.order = o; t.orderKey = key;
+  }
+  const ctx = await buildMask(g, -1);
+  if (!ctx || g !== gen || T !== t) return;
+  const mask = ctx.mask;
+  if (!mask) { t.view = t.order; t.nView = n; }
+  else {
+    let cnt = 0;
+    for (let i = 0; i < n; i++) cnt += mask[i];
+    const v = new Uint32Array(cnt);
+    let k = 0;
+    if (t.order) for (let i = 0; i < n; i++) { const r = t.order[i]; if (mask[r]) v[k++] = r; }
+    else for (let i = 0; i < n; i++) if (mask[i]) v[k++] = i;
+    t.view = v; t.nView = cnt;
+  }
+  t.sel = null;
+  $("scroller").scrollTop = 0;
+  fitRows();
+  setProg(null);
+  updateSpacer(); render(); updateStatus(); showDetail(); trInfo();
+}
+
+// ---------------------------------------------------------------- virtual grid
+function updateSpacer() {
+  const t = T, sp = $("spacer");
+  sp.style.height = Math.min(t.nView * ROW_H, MAXH) + "px";
+  layoutCols();
+  sp.style.width = t.totalW + "px";
+  $("nores").hidden = t.nView > 0;
+}
+
+function geom() {
+  const sc = $("scroller"), n = T.nView, vh = sc.clientHeight;
+  const full = n * ROW_H, st = sc.scrollTop;
+  let first, off;
+  if (full <= MAXH) { first = Math.floor(st / ROW_H); off = -(st - first * ROW_H); }
+  else {
+    const maxST = Math.max(1, Math.min(full, MAXH) - vh);
+    first = Math.max(0, Math.round(st / maxST * (n - vh / ROW_H))); off = 0;
+  }
+  return {sc, first, off, vh, vw: sc.clientWidth, sl: sc.scrollLeft};
+}
+
+let raf = 0;
+function schedule() { if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(); }); }
+
+function render() {
+  const t = T;
+  if (!t) return;
+  const {first, off, vh, vw, sl} = geom();
+  const layer = $("layer");
+  layer.style.height = vh + "px"; layer.style.width = vw + "px";
+  const nRows = Math.ceil(vh / ROW_H) + 2;
+  // visible columns
+  let c0 = 0, c1 = t.nc - 1;
+  while (c0 < t.nc - 1 && t.colX[c0] + t.widths[c0] <= sl) c0++;
+  while (c1 > c0 && t.colX[c1] >= sl + vw - GUTTER) c1--;
+  const sel = t.sel, box = rangeBox(), multi = box && (box.r1 > box.r0 || box.c1 > box.c0);
+  let html = "";
+  for (let i = 0; i < nRows; i++) {
+    const vi = first + i;
+    if (vi >= t.nView) break;
+    const r = rowAt(vi), cells = rowCells(r), inRow = box && vi >= box.r0 && vi <= box.r1;
+    html += '<div class="r' + (vi & 1 ? " odd" : "") + (inRow ? " rsel" : "") + '" style="top:' + (i * ROW_H + off) + 'px" data-vi="' + vi + '">';
+    for (let c = c0; c <= c1; c++) {
+      if (t.hidden[c]) continue;
+      let v = cells[c] || "";
+      const lim = ROW_H > 26 ? 1200 : 300;
+      if (v.length > lim) v = v.slice(0, lim) + "…";
+      html += '<div class="c' + (t.types[c] === "int" || t.types[c] === "float" ? " n" : "") + (sel && sel.vi === vi && sel.c === c ? " sel" : multi && inRow && c >= box.c0 && c <= box.c1 ? " rg" : "") + '" data-c="' + c + '" style="left:' + (GUTTER + t.colX[c] - sl) + "px;width:" + t.widths[c] + 'px">' + esc(v) + "</div>";
+    }
+    html += '<div class="g' + (inRow ? " in" : "") + '">' + fmtN(r + 1) + "</div></div>";
+  }
+  layer.innerHTML = html;
+  syncHead();
+}
+
+$("scroller").addEventListener("scroll", schedule);
+new ResizeObserver(() => { if (T) { render(); } }).observe($("scroller"));
+
+function updateStatus() {
+  const t = T;
+  $("st1").textContent = fmtN(t.nView) + (t.nView !== nData(t) ? " of " + fmtN(nData(t)) : "") + " rows · " + (t.hidden.includes(true) ? t.hidden.filter(h => !h).length + " of " + t.nc : t.nc) + " columns · " +
+    fmtB(t.size) + " · delimiter " + (t.delim === "\t" ? "TAB" : "“" + t.delim + "”");
+  updateSelStatus();
+}
+function updateSelStatus() {
+  const t = T, s = t && t.sel, b = rangeBox(), st = $("st2");
+  if (!s) { st.textContent = ""; return; }
+  const multi = b.r1 > b.r0 || b.c1 > b.c0;
+  let ncols = 0;
+  for (let c = b.c0; c <= b.c1; c++) if (!t.hidden[c]) ncols++;
+  const txt = multi ? fmtN(b.r1 - b.r0 + 1) + " rows × " + ncols + " cols selected" : "row " + fmtN(rowAt(s.vi) + 1) + " · " + t.cols[s.c];
+  st.innerHTML = "<span>" + esc(txt) + '</span><button id="bcopy" title="Copy as tab-separated text (Ctrl+C). Ctrl+Shift+C adds the column names">Copy' + (multi ? " selection" : " cell") + "</button>";
+}
+$("st2").addEventListener("click", e => { if (e.target.closest("#bcopy")) { copyRange(false); $("scroller").focus(); } });
+
+// ---------------------------------------------------------------- selection / keyboard / details
+function rangeBox() {
+  const t = T;
+  if (!t || !t.sel) return null;
+  const a = t.anc || t.sel;
+  return {r0: Math.min(a.vi, t.sel.vi), r1: Math.max(a.vi, t.sel.vi), c0: Math.min(a.c, t.sel.c), c1: Math.max(a.c, t.sel.c)};
+}
+const firstVisCol = () => stepCol(-1, 1), lastVisCol = () => stepCol(T.nc, -1);
+// extend = keep the anchor (shift-click / shift-arrows / drag), otherwise start a new selection
+function select(vi, c, scroll, extend, quiet) {
+  const t = T;
+  if (!t.nView) return;
+  vi = Math.max(0, Math.min(t.nView - 1, vi)); c = Math.max(0, Math.min(t.nc - 1, c));
+  if (!extend || !t.sel || !t.anc) t.anc = {vi, c};
+  t.sel = {vi, c};
+  if (scroll) ensureVisible(vi, c);
+  render();
+  if (!quiet) { updateSelStatus(); showDetail(); }
+}
+function ensureVisible(vi, c) {
+  const sc = $("scroller"), vh = sc.clientHeight, n = T.nView, full = n * ROW_H;
+  if (full <= MAXH) {
+    const top = vi * ROW_H;
+    if (top < sc.scrollTop) sc.scrollTop = top;
+    else if (top + ROW_H > sc.scrollTop + vh) sc.scrollTop = top + ROW_H - vh;
+  } else {
+    const {first} = geom(), vis = Math.floor(vh / ROW_H);
+    if (vi < first || vi >= first + vis) sc.scrollTop = vi / Math.max(1, n - vh / ROW_H) * Math.max(1, MAXH - vh);
+  }
+  const L = T.colX[c], R = L + T.widths[c], avail = sc.clientWidth - GUTTER;
+  if (L < sc.scrollLeft) sc.scrollLeft = L;
+  else if (R > sc.scrollLeft + avail) sc.scrollLeft = Math.min(L, R - avail);
+}
+// ---- mouse: click, shift+click, selDrag across cells, click / selDrag the row numbers to select whole rows
+let selDrag = null, dragTimer = 0;
+function hitCell(e) {
+  const t = T, sc = $("scroller"), r = sc.getBoundingClientRect(), {first, off, sl} = geom();
+  const vi = Math.max(0, Math.min(t.nView - 1, first + Math.floor((e.clientY - r.top - off) / ROW_H)));
+  const x = e.clientX - r.left + sl - GUTTER;
+  let c = firstVisCol();
+  for (let k = 0; k < t.nc; k++) if (!t.hidden[k] && t.colX[k] <= x) c = k;
+  return {vi, c};
+}
+function dragStep(e) {
+  const sc = $("scroller"), r = sc.getBoundingClientRect();
+  if (e.clientY < r.top + 24) sc.scrollTop -= 24; else if (e.clientY > r.bottom - 24) sc.scrollTop += 24;
+  if (e.clientX < r.left + GUTTER + 24) sc.scrollLeft -= 24; else if (e.clientX > r.right - 24) sc.scrollLeft += 24;
+  const h = hitCell(e);
+  if (selDrag.rows) {
+    if (!T.anc || selDrag.fresh) { T.anc = {vi: selDrag.vi0, c: firstVisCol()}; selDrag.fresh = false; }
+    select(h.vi, lastVisCol(), false, true, true);
+  } else select(h.vi, h.c, false, true, true);
+}
+$("layer").addEventListener("pointerdown", e => {
+  if (e.button !== 0 || !T) return;
+  const row = e.target.closest(".r");
+  if (!row) return;
+  const vi = +row.dataset.vi, cell = e.target.closest(".c"), rows = !!e.target.closest(".g");
+  e.preventDefault();
+  $("scroller").focus({preventScroll: true});
+  if (rows) {
+    if (e.shiftKey && T.sel) { selDrag = {rows: true, vi0: T.anc ? T.anc.vi : T.sel.vi}; T.anc = {vi: selDrag.vi0, c: firstVisCol()}; select(vi, lastVisCol(), false, true, true); }
+    else { selDrag = {rows: true, vi0: vi}; T.anc = {vi, c: firstVisCol()}; T.sel = null; select(vi, lastVisCol(), false, true, true); T.anc = {vi, c: firstVisCol()}; }
+  } else if (cell) {
+    const c = +cell.dataset.c;
+    selDrag = {rows: false};
+    if (e.shiftKey && T.sel) select(vi, c, false, true, true); else select(vi, c, false, false, true);
+  } else return;
+  selDrag.last = e;
+  e.currentTarget.setPointerCapture(e.pointerId);
+  clearInterval(dragTimer);
+  dragTimer = setInterval(() => { if (selDrag && selDrag.last) dragStep(selDrag.last); }, 60);
+});
+$("layer").addEventListener("pointermove", e => { if (selDrag) { selDrag.last = e; dragStep(e); } });
+const endSel = () => { if (!selDrag) return; selDrag = null; clearInterval(dragTimer); updateSelStatus(); showDetail(); };
+$("layer").addEventListener("pointerup", endSel);
+$("layer").addEventListener("pointercancel", endSel);
+$("layer").addEventListener("dblclick", e => { if (e.target.closest(".c")) copyCell(); });
+
+function stepCol(c, d) {          // next visible column from c in direction d (stays put at the edges)
+  let k = c + d;
+  while (k >= 0 && k < T.nc && T.hidden[k]) k += d;
+  return k < 0 || k >= T.nc ? Math.max(0, Math.min(T.nc - 1, c)) : k;
+}
+function cellValue(sel) { return rowCells(rowAt(sel.vi))[sel.c] || ""; }
+function copyText(s) {
+  const done = () => toast("Copied");
+  if (navigator.clipboard && window.isSecureContext !== false) navigator.clipboard.writeText(s).then(done, () => fallbackCopy(s, done));
+  else fallbackCopy(s, done);
+}
+function fallbackCopy(s, done) {
+  const ta = document.createElement("textarea"); ta.value = s; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); done(); } catch (e) {}
+  ta.remove();
+}
+function copyCell() { if (T && T.sel) copyText(cellValue(T.sel)); }
+// copy the selected block as tab-separated text (pastes into Excel / Sheets / mail as a table); a single cell is copied raw
+function copyRange(withHeader) {
+  const t = T, b = rangeBox();
+  if (!b) return;
+  const cols = [];
+  for (let c = b.c0; c <= b.c1; c++) if (!t.hidden[c]) cols.push(c);
+  const nRows = b.r1 - b.r0 + 1;
+  if (nRows * cols.length > 5e6) { toast("Selection too large to copy (" + fmtN(nRows * cols.length) + " cells)"); return; }
+  if (nRows === 1 && cols.length === 1 && !withHeader) { copyText(cellValue({vi: b.r0, c: cols[0]})); return; }
+  const q = v => /["\t\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  const lines = [];
+  if (withHeader) lines.push(cols.map(c => q(t.cols[c])).join("\t"));
+  for (let vi = b.r0; vi <= b.r1; vi++) { const cells = rowCells(rowAt(vi)); lines.push(cols.map(c => q(cells[c] || "")).join("\t")); }
+  copyText(lines.join("\n"));
+  toast("Copied " + fmtN(nRows) + " rows × " + cols.length + " cols" + (withHeader ? " with headers" : ""));
+}
+let tt = 0;
+function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(tt); tt = setTimeout(() => t.classList.remove("show"), 1100); }
+
+$("scroller").addEventListener("keydown", e => {
+  const t = T;
+  if (!t || !t.nView) return;
+  const s = t.sel || {vi: 0, c: 0}, page = Math.max(1, Math.floor($("scroller").clientHeight / ROW_H) - 1);
+  let vi = s.vi, c = s.c, handled = true;
+  switch (e.key) {
+    case "ArrowDown": vi++; break;
+    case "ArrowUp": vi--; break;
+    case "ArrowRight": c = stepCol(c, 1); break;
+    case "ArrowLeft": c = stepCol(c, -1); break;
+    case "PageDown": vi += page; break;
+    case "PageUp": vi -= page; break;
+    case "Home": if (e.ctrlKey) vi = 0; else c = stepCol(-1, 1); break;
+    case "End": if (e.ctrlKey) vi = t.nView - 1; else c = stepCol(T.nc, -1); break;
+    case "Enter": toggleDetail(); return;
+    case "c": case "C": if (e.ctrlKey || e.metaKey) { copyRange(e.shiftKey); e.preventDefault(); } return;
+    case "a": case "A":
+      if (e.ctrlKey || e.metaKey) {                       // select everything in the current view
+        e.preventDefault(); t.anc = {vi: 0, c: firstVisCol()}; t.sel = {vi: t.nView - 1, c: lastVisCol()}; render(); updateSelStatus(); showDetail();
+      }
+      return;
+    case "Escape": if (t.sel) { t.anc = {vi: t.sel.vi, c: t.sel.c}; render(); updateSelStatus(); } return;
+    default: handled = false;
+  }
+  if (handled) { e.preventDefault(); select(vi, c, true, e.shiftKey); }
+});
+window.addEventListener("keydown", e => {
+  if (e.target.matches("input, select, textarea")) { if (e.key === "Escape") { e.target.blur(); } return; }
+  if ((e.key === "/" || (e.key === "f" && (e.ctrlKey || e.metaKey))) && T) { e.preventDefault(); $("q").focus(); $("q").select(); }
+});
+
+function toggleDetail() { const d = $("detail"); d.hidden = !d.hidden; $("bdet").classList.toggle("on", !d.hidden); showDetail(); render(); }
+function utcLine(c, v) {
+  const ty = T.types[c];
+  if ((ty !== "time" && ty !== "epoch") || v === "") return "";
+  const ms = typedValue(ty, v, c);
+  return ms === ms ? '<div class="u">↳ ' + fmtTs(ms) + "</div>" : "";
+}
+function showDetail() {
+  const t = T, d = $("detail");
+  if (!t || d.hidden) return;
+  const list = $("dlist");
+  if (!t.sel) { $("dtitle").textContent = "Row"; list.innerHTML = '<div class="kv"><div class="k">Click a cell to inspect its row</div></div>'; return; }
+  const r = rowAt(t.sel.vi), cells = rowCells(r);
+  $("dtitle").textContent = "Row " + fmtN(r + 1);
+  let h = "";
+  for (let c = 0; c < t.nc; c++) h += '<div class="kv' + (c === t.sel.c ? " cur" : "") + '" data-c="' + c + '"><div class="k">' + esc(t.cols[c]) + '</div><div class="v">' + esc(cells[c] || "") + "</div>" + utcLine(c, cells[c] || "") + "</div>";
+  list.innerHTML = h;
+  const cur = list.querySelector(".cur"); if (cur) cur.scrollIntoView({block: "nearest"});
+}
+$("dlist").addEventListener("click", e => { const kv = e.target.closest(".kv"); if (kv && kv.dataset.c != null) copyText(rowCells(rowAt(T.sel.vi))[+kv.dataset.c] || ""); });
+$("bdet").addEventListener("click", toggleDetail);
+$("dclose").addEventListener("click", toggleDetail);
+
+// ---------------------------------------------------------------- column statistics
+async function showStats(c) {
+  const t = T, vals = await colValues(c, null);
+  if (!vals || T !== t) return;
+  const type = t.types[c], typed = type !== "str" ? await typedColumn(c, null) : null;
+  setProg(null);
+  setProg(0.5, "Applying the other filters…");
+  const ctx = await buildMask(null, c);
+  setProg(null);
+  if (!ctx || T !== t) return;
+  const cmask = ctx.mask;
+  const counts = new Map();
+  let ctxN = 0;
+  for (let i = 0; i < vals.length; i++) if (!cmask || cmask[i]) { counts.set(vals[i], (counts.get(vals[i]) || 0) + 1); ctxN++; }
+  for (const v of (t.sets[c] || [])) if (!counts.has(v)) counts.set(v, 0);      // keep ticked values that the other filters exclude, so they can be unticked
+  const rows = [...counts].map(([v, n]) => ({v, n, k: type === "str" ? v : typedValue(type, v, c)}));
+  const pick = new Set(t.sets[c] || []);
+  let order = "count", query = "", shown = [];
+  $("dh").textContent = t.cols[c] + " · " + TYPE_NAME[type];
+  // summary over the rows currently in view
+  let sum = "";
+  if (typed) {
+    let mn = Infinity, mx = -Infinity, tot = 0, k = 0;
+    const xs = [];
+    for (let i = 0; i < typed.length; i++) { if (cmask && !cmask[i]) continue; const x = typed[i]; if (x === x) { if (x < mn) mn = x; if (x > mx) mx = x; tot += x; k++; xs.push(x); } }
+    const f = x => type === "time" || type === "epoch" ? fmtTs(x) : fmtN(+x.toPrecision(12));
+    sum = '<div class="sum"><span>parsed</span><b>' + fmtN(k) + " of " + fmtN(ctxN) + " rows</b>";
+    if (k) {
+      sum += "<span>min</span><b>" + f(mn) + "</b><span>max</span><b>" + f(mx) + "</b>";
+      if (type === "time" || type === "epoch") {
+        const days = (mx - mn) / 86400000;
+        sum += "<span>span</span><b>" + (days >= 1 ? days.toFixed(2) + " days" : ((mx - mn) / 3600000).toFixed(2) + " hours") + "</b>";
+      } else {
+        xs.sort((a, b) => a - b);
+        sum += "<span>sum</span><b>" + f(tot) + "</b><span>mean</span><b>" + f(tot / k) + "</b><span>median</span><b>" + f(xs[xs.length >> 1]) + "</b>";
+      }
+    }
+    sum += "</div>";
+  }
+  $("dbody").innerHTML = sum + '<div class="ctl"><input type="search" id="vq" placeholder="Search values…" aria-label="Search values">' +
+    '<select id="vo"><option value="count">By count</option><option value="value">By value</option></select></div>' +
+    '<div class="ctl"><button id="vall">Select all matching</button><button id="vinv">Invert</button><button id="vnone">Clear selection</button><span class="sp"></span>' +
+    '<button id="vapply" class="on">Keep selected values</button></div><p class="hint" id="vhint"></p><div id="vlist"></div>';
+  const list = () => {
+    const q = query.toLowerCase();
+    let m = rows.filter(r => !q || r.v.toLowerCase().includes(q));
+    if (order === "value") m.sort((a, b) => type === "str" ? (a.v < b.v ? -1 : a.v > b.v ? 1 : 0) : (a.k !== a.k) - (b.k !== b.k) || a.k - b.k);
+    else m.sort((a, b) => b.n - a.n);
+    shown = m;
+    const top = m.slice(0, 300), max = top.length ? Math.max(...top.map(r => r.n)) : 1;
+    let h = "";
+    top.forEach((r, i) => {
+      h += '<label class="sr"><span class="val"><input type="checkbox" data-i="' + i + '"' + (pick.has(r.v) ? " checked" : "") + ">" +
+        (r.v === "" ? "<i>(empty)</i>" : esc(r.v.length > 120 ? r.v.slice(0, 120) + "…" : r.v)) + '</span><span class="n">' + fmtN(r.n) + " · " + (ctxN ? 100 * r.n / ctxN : 0).toFixed(1) +
+        '%</span><span class="bar2" style="width:' + Math.max(1, 100 * r.n / max) + '%"></span></label>';
+    });
+    $("vlist").innerHTML = h;
+    $("vhint").textContent = fmtN(m.length) + " of " + fmtN(rows.length) + " distinct values" + (m.length > top.length ? " (first " + top.length + " shown)" : "") +
+      " · counts over the " + fmtN(ctxN) + (ctxN === vals.length ? " rows" : " rows kept by the other filters") + " · " + pick.size + " selected";
+  };
+  $("vlist").onchange = e => { const cb = e.target.closest("input[type=checkbox]"); if (!cb) return; const r = shown[+cb.dataset.i]; cb.checked ? pick.add(r.v) : pick.delete(r.v); list(); };
+  $("vq").oninput = e => { query = e.target.value; list(); };
+  $("vo").onchange = e => { order = e.target.value; list(); };
+  $("vall").onclick = () => { for (const r of shown) pick.add(r.v); list(); };
+  $("vinv").onclick = () => { for (const r of shown) pick.has(r.v) ? pick.delete(r.v) : pick.add(r.v); list(); };
+  $("vnone").onclick = () => { pick.clear(); list(); };
+  $("vapply").onclick = () => { t.sets[c] = pick.size ? new Set(pick) : null; $("dlg").close(); refresh(); };
+  list();
+  $("dlg").showModal();
+}
+function showColumns() {
+  const t = T;
+  let query = "";
+  $("dh").textContent = "Columns to show";
+  $("dbody").onclick = null;
+  $("dbody").innerHTML = '<div class="ctl"><input type="search" id="cq" placeholder="Search columns…" aria-label="Search columns"></div>' +
+    '<div class="ctl"><button id="call">Show all</button><button id="cnone">Hide all</button><button id="cinv">Invert</button></div>' +
+    '<p class="hint" id="chint"></p><div id="clist"></div>';
+  const apply = () => {
+    if (!t.hidden.includes(false)) t.hidden[0] = false;           // never hide every column
+    if (t.sel && t.hidden[t.sel.c]) t.sel = null;
+    layoutHeader(); updateSpacer(); render(); updateStatus(); showDetail(); list();
+  };
+  const list = () => {
+    const q = query.toLowerCase();
+    let h = "";
+    t.cols.forEach((name, c) => {
+      if (q && !name.toLowerCase().includes(q)) return;
+      const note = (t.filters[c] || t.sets[c]) ? " · filtered" : "";
+      h += '<label class="sr"><span class="val"><input type="checkbox" data-c="' + c + '"' + (t.hidden[c] ? "" : " checked") + "> " + esc(name) +
+        '</span><span class="n">' + TYPE_LABEL[t.types[c]] + note + "</span></label>";
+    });
+    $("clist").innerHTML = h || '<p class="hint">No column matches.</p>';
+    $("chint").textContent = t.hidden.filter(x => !x).length + " of " + t.nc + " columns shown · applies to the grid and to “Export view”";
+  };
+  const forMatching = fn => { const q = query.toLowerCase(); t.cols.forEach((name, c) => { if (!q || name.toLowerCase().includes(q)) t.hidden[c] = fn(t.hidden[c]); }); apply(); };
+  $("clist").onchange = e => { const cb = e.target.closest("input[type=checkbox]"); if (!cb) return; t.hidden[+cb.dataset.c] = !cb.checked; apply(); };
+  $("cq").oninput = e => { query = e.target.value; list(); };
+  $("call").onclick = () => forMatching(() => false);
+  $("cnone").onclick = () => forMatching(() => true);
+  $("cinv").onclick = () => forMatching(h => !h);
+  list();
+  $("dlg").showModal();
+}
+$("bcols").addEventListener("click", showColumns);
+$("dx").addEventListener("click", () => $("dlg").close());
+$("dlg").addEventListener("click", e => { if (e.target === $("dlg")) $("dlg").close(); });
+
+// ---------------------------------------------------------------- time range (histogram brush on a timestamp column)
+const tr = {open: false, c: -1, min: 0, max: 0, dlo: 0, dhi: 1, bins: 200, counts: null, sel: null, drag: null};
+const timeCols = () => T ? T.cols.map((_, c) => c).filter(c => T.types[c] === "time" || T.types[c] === "epoch") : [];
+const shortTs = ms => { const x = fmtTs(ms); return x.endsWith(".000Z") ? x.slice(0, -5) : x.slice(0, -1); };   // YYYY-MM-DD HH:mm:ss[.sss], UTC
+const trUnit = () => { const sp = tr.dhi - tr.dlo; return sp > 2 * 86400000 ? 60000 : sp > 3 * 3600000 ? 1000 : 1; };
+const trSnap = ms => { const u = trUnit(); return Math.round(ms / u) * u; };
+
+function trOnLoad() { tr.c = -1; tr.sel = null; tr.counts = null; if (tr.open) trSetup(); trInfo(); }
+function trTypeChanged(c) {
+  if (T.tr && T.tr.c === c && !timeCols().includes(c)) T.tr = null;
+  if (tr.open) trSetup();
+}
+async function toggleTr() {
+  if (tr.open) { tr.open = false; $("trange").hidden = true; trInfo(); return; }
+  if (!timeCols().length) { toast("No timestamp column detected. Click a column's type badge to set one."); return; }
+  tr.open = true; $("trange").hidden = false;
+  await trSetup();
+}
+async function trSetup() {
+  const cols = timeCols();
+  if (!cols.length) { tr.open = false; $("trange").hidden = true; trInfo(); return; }
+  $("trcol").innerHTML = cols.map(c => '<option value="' + c + '">' + esc(T.cols[c]) + "</option>").join("");
+  let c = cols.includes(tr.c) ? tr.c : T.tr ? T.tr.c : T.sort && cols.includes(T.sort.c) ? T.sort.c : cols[0];
+  await trSetCol(c);
+}
+async function trSetCol(c) {
+  const t = T, x = await typedColumn(c, null);
+  setProg(null);
+  if (!x || T !== t) return;
+  tr.c = c; $("trcol").value = c;
+  let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < x.length; i++) { const v = x[i]; if (v === v) { if (v < mn) mn = v; if (v > mx) mx = v; } }
+  if (!(mn <= mx)) { tr.counts = null; $("trinfo").textContent = "no parsable timestamps in this column"; return; }
+  tr.min = mn; tr.max = mx; tr.dlo = mn; tr.dhi = mx > mn ? mx : mn + 1;
+  tr.sel = t.tr && t.tr.c === c ? {lo: t.tr.lo, hi: t.tr.hi} : null;
+  trCount(); trFill(); trDraw(); trInfo();
+}
+function trCount() {
+  const x = T.typed.get(tr.c), n = tr.bins, counts = new Uint32Array(n), span = tr.dhi - tr.dlo;
+  if (x) for (let i = 0; i < x.length; i++) {
+    const v = x[i];
+    if (v >= tr.dlo && v <= tr.dhi) counts[Math.min(n - 1, ((v - tr.dlo) / span * n) | 0)]++;
+  }
+  tr.counts = counts;
+}
+function trFill() {
+  const s = tr.sel;
+  $("trfrom").value = s && isFinite(s.lo) ? shortTs(s.lo) : "";
+  $("trto").value = s && isFinite(s.hi) ? shortTs(s.hi) : "";
+  $("trfrom").classList.remove("bad"); $("trto").classList.remove("bad");
+}
+function trInfo() {
+  const b = $("btr");
+  if (!T) return;
+  b.classList.toggle("on", !!T.tr || tr.open);
+  if (tr.open && tr.counts) $("trinfo").textContent = T.tr ? fmtN(T.nView) + " of " + fmtN(nData(T)) + " rows in range" : fmtN(nData(T)) + " rows · drag on the chart to select";
+}
+function trDraw() {
+  if (!tr.open || !tr.counts) return;
+  const cv = $("trcv"), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (!W) return;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const g = cv.getContext("2d");
+  g.scale(dpr, dpr);
+  const cs = getComputedStyle(document.documentElement), col = n => cs.getPropertyValue(n).trim();
+  const accent = col("--accent"), axis = col("--axis"), muted = col("--muted"), grid = col("--grid");
+  const top = 6, bot = H - 16, bh = bot - top, n = tr.counts.length, bw = W / n, span = tr.dhi - tr.dlo;
+  let max = 1;
+  for (const v of tr.counts) if (v > max) max = v;
+  const xOf = ms => (ms - tr.dlo) / span * W, sel = tr.sel;
+  const sx0 = sel ? Math.max(0, xOf(sel.lo)) : 0, sx1 = sel ? Math.min(W, xOf(sel.hi)) : W;
+  g.strokeStyle = grid; g.lineWidth = 1;
+  for (let k = 1; k < 4; k++) { const y = Math.round(top + bh * k / 4) + .5; g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+  for (let i = 0; i < n; i++) {
+    const v = tr.counts[i]; if (!v) continue;
+    const h = Math.max(1.5, v / max * bh), x = i * bw, inside = !sel || (x + bw > sx0 && x < sx1);
+    g.globalAlpha = inside ? 0.92 : 0.5; g.fillStyle = inside ? accent : axis;
+    g.fillRect(x + .5, bot - h, Math.max(1, bw - 1), h);
+  }
+  g.globalAlpha = 1;
+  g.strokeStyle = axis; g.beginPath(); g.moveTo(0, bot + .5); g.lineTo(W, bot + .5); g.stroke();
+  // ticks
+  const f = span < 3 * 3600000 ? ms => fmtTs(ms).slice(11, 19) : span < 2 * 86400000 ? ms => fmtTs(ms).slice(11, 16)
+    : span < 60 * 86400000 ? ms => fmtTs(ms).slice(5, 16) : ms => fmtTs(ms).slice(0, 10);
+  g.fillStyle = muted; g.font = "10px " + (col("--mono") || "monospace");
+  const nt = Math.max(2, Math.min(7, Math.floor(W / 110)));
+  for (let k = 0; k < nt; k++) {
+    const fr = k / (nt - 1), lab = f(tr.dlo + fr * span), tw = g.measureText(lab).width;
+    g.textAlign = k === 0 ? "left" : k === nt - 1 ? "right" : "center";
+    g.fillText(lab, k === 0 ? 2 : k === nt - 1 ? W - 2 : fr * W, H - 4);
+  }
+  if (sel) {
+    g.fillStyle = accent; g.globalAlpha = .13; g.fillRect(sx0, top, Math.max(1, sx1 - sx0), bh); g.globalAlpha = 1;
+    g.fillStyle = accent;
+    if (isFinite(sel.lo) && sx0 > 0) { g.fillRect(sx0 - 1, top, 2, bh); g.fillRect(sx0 - 4, top + bh / 2 - 9, 8, 18); }
+    if (isFinite(sel.hi) && sx1 < W) { g.fillRect(sx1 - 1, top, 2, bh); g.fillRect(sx1 - 4, top + bh / 2 - 9, 8, 18); }
+  }
+}
+function applyRange(lo, hi) {
+  if (lo > hi) [lo, hi] = [hi, lo];
+  T.tr = {c: tr.c, lo, hi}; tr.sel = {lo, hi};
+  trFill(); trDraw(); refresh();
+}
+function clearRange() {
+  if (!T.tr && !tr.sel) return;
+  const had = !!T.tr;
+  T.tr = null; tr.sel = null; trFill(); trDraw();
+  if (had) refresh(); else trInfo();
+}
+function trFromInputs() {
+  const a = $("trfrom").value.trim(), b = $("trto").value.trim();
+  if (!a && !b) { clearRange(); return; }
+  const dmy = T.dmy[tr.c];
+  const P = (x, end) => {
+    if (!x) return end ? Infinity : -Infinity;
+    const r = parseTsFull(x, dmy);
+    if (r) return end ? r.ms + (r.span > 1 ? r.span - 1 : 0) : r.ms;      // a bare date as "To" includes the whole day
+    return parseEpoch(x);
+  };
+  const lo = P(a, false), hi = P(b, true);
+  $("trfrom").classList.toggle("bad", lo !== lo); $("trto").classList.toggle("bad", hi !== hi);
+  if (lo !== lo || hi !== hi) return;
+  applyRange(lo, hi);
+}
+const trX = e => { const r = $("trcv").getBoundingClientRect(); return Math.max(0, Math.min(r.width, e.clientX - r.left)); };
+const trXOf = ms => (ms - tr.dlo) / (tr.dhi - tr.dlo) * $("trcv").clientWidth;
+const trT = px => tr.dlo + px / $("trcv").clientWidth * (tr.dhi - tr.dlo);
+$("trcv").addEventListener("pointerdown", e => {
+  if (!tr.counts) return;
+  const px = trX(e), sel = tr.sel;
+  let mode = "new", anchor = trSnap(trT(px)), orig = null;
+  if (sel) {
+    const xl = trXOf(sel.lo), xh = trXOf(sel.hi);
+    if (Math.abs(px - xl) <= 7) { mode = "lo"; anchor = sel.hi; }
+    else if (Math.abs(px - xh) <= 7) { mode = "hi"; anchor = sel.lo; }
+    else if (isFinite(sel.lo) && isFinite(sel.hi) && px > xl && px < xh) { mode = "move"; anchor = trT(px); orig = {lo: sel.lo, hi: sel.hi}; }
+  }
+  tr.drag = {mode, anchor, px0: px, moved: false, orig};
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+});
+$("trcv").addEventListener("pointermove", e => {
+  const cv = e.currentTarget, px = trX(e), d = tr.drag;
+  if (!tr.counts) return;
+  if (d) {
+    if (Math.abs(px - d.px0) > 2) d.moved = true;
+    if (!d.moved) return;
+    const t = trSnap(trT(px));
+    if (d.mode === "move") { const dt = trSnap(trT(px) - d.anchor); tr.sel = {lo: d.orig.lo + dt, hi: d.orig.hi + dt}; }
+    else tr.sel = {lo: Math.min(d.anchor, t), hi: Math.max(d.anchor, t)};
+    trFill(); trDraw(); return;
+  }
+  const sel = tr.sel;
+  let cur = "crosshair";
+  if (sel && (Math.abs(px - trXOf(sel.lo)) <= 7 || Math.abs(px - trXOf(sel.hi)) <= 7)) cur = "ew-resize";
+  else if (sel && isFinite(sel.lo) && isFinite(sel.hi) && px > trXOf(sel.lo) && px < trXOf(sel.hi)) cur = "grab";
+  cv.style.cursor = cur;
+  const b = Math.min(tr.counts.length - 1, Math.floor(px / cv.clientWidth * tr.counts.length));
+  $("trinfo").textContent = shortTs(trT(px)) + " UTC · " + fmtN(tr.counts[b]) + " rows in this bar";
+});
+$("trcv").addEventListener("pointerup", () => {
+  const d = tr.drag; tr.drag = null;
+  if (!d) return;
+  if (d.moved && tr.sel) applyRange(tr.sel.lo, tr.sel.hi);
+  else if (d.mode === "new") clearRange();
+});
+$("trcv").addEventListener("pointercancel", () => { tr.drag = null; });
+$("trcv").addEventListener("pointerleave", () => { if (!tr.drag) trInfo(); });
+for (const id of ["trfrom", "trto"]) {
+  $(id).addEventListener("change", trFromInputs);
+  $(id).addEventListener("keydown", e => { if (e.key === "Enter") trFromInputs(); });
+}
+$("trcol").addEventListener("change", e => {
+  const c = +e.target.value;
+  if (T.tr && T.tr.c !== c) { T.tr = null; refresh(); }
+  trSetCol(c);
+});
+$("trchips").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b || !tr.counts) return;
+  applyRange(tr.max - +b.dataset.p, tr.max);
+});
+function trShift(dir) {
+  const s = tr.sel;
+  if (!s || !isFinite(s.lo) || !isFinite(s.hi)) { toast("Select a range first"); return; }
+  const w = s.hi - s.lo + 1;
+  applyRange(s.lo + dir * w, s.hi + dir * w);
+}
+$("trprev").addEventListener("click", () => trShift(-1));
+$("trnext").addEventListener("click", () => trShift(1));
+$("trzin").addEventListener("click", () => {
+  const s = tr.sel;
+  if (!s) { toast("Select a range first"); return; }
+  const lo = isFinite(s.lo) ? Math.max(s.lo, tr.min) : tr.min, hi = isFinite(s.hi) ? Math.min(s.hi, tr.max) : tr.max;
+  if (!(hi > lo)) return;
+  tr.dlo = lo; tr.dhi = hi; trCount(); trDraw();
+});
+$("trzout").addEventListener("click", () => { tr.dlo = tr.min; tr.dhi = tr.max > tr.min ? tr.max : tr.min + 1; trCount(); trDraw(); });
+$("trclear").addEventListener("click", clearRange);
+$("trx").addEventListener("click", toggleTr);
+$("btr").addEventListener("click", toggleTr);
+new ResizeObserver(() => trDraw()).observe($("trcv"));
+
+// ---------------------------------------------------------------- wrap toggle (rows get a fixed taller height, long values wrap over WRAP_LINES lines)
+let wrapOn = false;
+function applyRowH(rh) {
+  if (rh === ROW_H) return;
+  const keep = T && T.nView ? geom().first : 0;
+  ROW_H = rh;
+  document.documentElement.style.setProperty("--rowh", ROW_H + "px");
+  if (T) {
+    updateSpacer();
+    const sc = $("scroller"), n = T.nView, full = n * ROW_H, vh = sc.clientHeight;
+    sc.scrollTop = full <= MAXH ? keep * ROW_H : keep / Math.max(1, n - vh / ROW_H) * Math.max(1, MAXH - vh);
+    render();
+  }
+}
+// The row height is global (the grid is virtualised), so it is sized for the *visible* columns only: it is the number of lines (max WRAP_LINES)
+// that the longest value among a sample of rows needs at the current column widths. Hidden columns are ignored; if nothing needs a second
+// line the rows stay at the normal height.
+function fitRows() {
+  if (!wrapOn) return;
+  const t = T;
+  let lines = 1;
+  if (t && t.nView) {
+    const n = t.nView, idx = [], vis = [], CH = 7.6;
+    for (let i = 0; i < Math.min(n, 200); i++) idx.push(i);
+    for (let i = 200, step = Math.max(1, Math.floor(n / 200)); i < n; i += step) idx.push(i);
+    for (let c = 0; c < t.nc; c++) if (!t.hidden[c]) vis.push([c, Math.max(4, Math.floor((t.widths[c] - 16) / CH))]);
+    outer: for (const vi of idx) {
+      const cells = rowCells(rowAt(vi));
+      for (const [c, cpl] of vis) {
+        const v = cells[c] || "";
+        if (v.length <= cpl && v.indexOf("\n") < 0) continue;
+        let l = 0;
+        for (const seg of v.split("\n")) l += Math.max(1, Math.ceil(seg.length / cpl));
+        if (l > lines) { lines = Math.min(l, WRAP_LINES); if (lines >= WRAP_LINES) break outer; }
+      }
+    }
+  }
+  document.documentElement.style.setProperty("--lines", lines);
+  applyRowH(lines <= 1 ? 26 : lines * 18 + 8);
+}
+function setWrap(on) {
+  wrapOn = on;
+  $("layer").classList.toggle("wrap", on);
+  $("bwrap").classList.toggle("on", on);
+  lsSet("csvviewer.wrap", on ? "1" : "0");
+  if (on) fitRows(); else applyRowH(26);
+  if (T) render();
+}
+$("bwrap").addEventListener("click", () => setWrap(!wrapOn));
+if (lsGet("csvviewer.wrap") === "1") setWrap(true);
+
+// ---------------------------------------------------------------- toolbar, export, theme, input
+let qtimer = 0;
+$("q").addEventListener("input", () => { clearTimeout(qtimer); qtimer = setTimeout(() => T && refresh(), 250); });
+$("bre").addEventListener("click", () => { reOn = !reOn; $("bre").classList.toggle("on", reOn); if (T && $("q").value) refresh(); });
+$("bcase").addEventListener("click", () => { caseOn = !caseOn; $("bcase").classList.toggle("on", caseOn); if (T && $("q").value) refresh(); });
+$("hdr").addEventListener("change", () => T && configure());
+$("dsel").addEventListener("change", () => T && configure());
+
+$("bexp").addEventListener("click", () => {
+  const t = T;
+  if (!t) return;
+  const parts = [], vis = [];
+  for (let c = 0; c < t.nc; c++) if (!t.hidden[c]) vis.push(c);
+  if (vis.length === t.nc) {                         // all columns: keep the original text byte for byte
+    if (t.base) parts.push(t.text.slice(t.st[0], t.en[0]));
+    for (let i = 0; i < t.nView; i++) parts.push(recStr(rowAt(i)));
+  } else {                                           // subset of columns: rebuild the lines with proper quoting
+    const q = v => /["\n\r]/.test(v) || v.includes(t.delim) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    if (t.base) parts.push(vis.map(c => q(t.cols[c])).join(t.delim));
+    for (let i = 0; i < t.nView; i++) { const cells = rowCells(rowAt(i)); parts.push(vis.map(c => q(cells[c] || "")).join(t.delim)); }
+  }
+  const blob = new Blob([parts.join("\n") + "\n"], {type: "text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = t.name.replace(/\.[^.]+$/, "") + "-view.csv";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast("Exported " + fmtN(t.nView) + " rows");
+});
+
+const THEMES = ["auto", "dark", "light"], THEME_LABEL = {auto: "◐ Auto", dark: "☾ Dark", light: "☀ Light"};
+const THEME_TIP = {auto: "Theme: follows the system. Click: dark (indoor work)", dark: "Theme: dark, for indoor work. Click: light (outdoor / sunlight)", light: "Theme: light, high contrast for outdoor work. Click: follow the system"};
+function applyTheme(v) {
+  if (!THEMES.includes(v)) v = "auto";
+  if (v === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = v;
+  if (typeof trDraw === "function") trDraw();
+  $("bthm").textContent = THEME_LABEL[v]; $("bthm").title = THEME_TIP[v]; $("bthm").dataset.v = v;
+}
+applyTheme(lsGet("csvviewer.theme"));
+$("bthm").addEventListener("click", () => {
+  const nx = THEMES[(THEMES.indexOf($("bthm").dataset.v) + 1) % THEMES.length];
+  applyTheme(nx); lsSet("csvviewer.theme", nx);
+});
+
+$("bopen").addEventListener("click", () => $("file").click());
+$("drop").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", e => { const f = e.target.files[0]; if (f) openFile(f); e.target.value = ""; });
+window.addEventListener("dragover", e => { e.preventDefault(); document.body.classList.add("drag"); });
+window.addEventListener("dragleave", e => { if (!e.relatedTarget) document.body.classList.remove("drag"); });
+window.addEventListener("drop", e => {
+  e.preventDefault(); document.body.classList.remove("drag");
+  const f = e.dataTransfer.files[0]; if (f) openFile(f);
+});
+(async () => {   // csvview.py serves the file at ?src=...
+  const q = new URLSearchParams(location.search), src = q.get("src");
+  if (!src) return;
+  try {
+    const r = await fetch(src);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    await readStream(r.body, +r.headers.get("content-length") || 0, q.get("name") || "data.csv");
+  } catch (e) { setProg(null, "Could not load " + src + ": " + e); }
+})();
+window.addEventListener("paste", e => {
+  if (e.target.matches("input, textarea")) return;
+  const s = e.clipboardData && e.clipboardData.getData("text");
+  if (s) { e.preventDefault(); loadText(s, "pasted.csv", s.length); }
+});
+</script>
+</body>
+</html>
