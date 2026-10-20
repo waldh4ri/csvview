@@ -12,7 +12,7 @@ uploaded or sent anywhere. Stop with Ctrl+C.
 Viewer features: millions of rows (virtual scrolling), search across all columns (plain or regex), a filter box and a
 value picker (checkbox list) on every column, automatic integer / decimal / timestamp detection (type badge in the
 header, click it to override) with numeric / chronological sort and range filters (">=2026-09-28", "10..20"),
-sort, column resize, row details panel, export of the filtered view. Timestamps without a timezone are read as UTC.
+sort, column resize / reorder (drag a header) / hide (right-click a header), row details panel, export of the filtered view. Timestamps without a timezone are read as UTC.
 """
 import argparse
 import gzip

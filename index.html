@@ -181,6 +181,17 @@ dialog { border-radius: 14px; }
 #empty h2 { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 22px; }
 #toast { box-shadow: var(--shadow); }
 #bthm { min-width: 84px; }
+/* ---- column reorder (drag a header) + header context menu ---- */
+.hc.mv { z-index: 4; background: color-mix(in srgb, var(--accent) 22%, var(--head)); box-shadow: var(--shadow), inset 0 0 0 1px var(--accent); cursor: grabbing; border-radius: 4px; }
+body.colmv, body.colmv * { cursor: grabbing !important; }
+#dropmark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); box-shadow: 0 0 8px var(--accent); z-index: 6; pointer-events: none; }
+#cmenu { position: fixed; z-index: 20; min-width: 210px; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+#cmenu .mh { padding: 4px 10px 6px; color: var(--muted); font-size: 11px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#cmenu button { display: flex; width: 100%; justify-content: space-between; gap: 16px; border: 0; background: transparent; border-radius: 6px; padding: 5px 10px; text-align: left; }
+#cmenu button:hover, #cmenu button:focus-visible { background: var(--hover); outline: none; }
+#cmenu button:disabled { color: var(--muted); cursor: default; background: transparent; transform: none; }
+#cmenu button kbd { font: 11px var(--mono); color: var(--muted); }
+#cmenu hr { border: 0; border-top: 1px solid var(--grid); margin: 4px 2px; }
 </style>
 </head>
 <body>
@@ -227,6 +238,7 @@ dialog { border-radius: 14px; }
     <div id="main">
       <div id="head" hidden><div id="hg">#</div><div id="hin"></div></div>
       <div id="scroller" tabindex="0" hidden><div id="spacer"><div id="layer"></div></div><div id="nores" hidden>No matching rows</div></div>
+      <div id="dropmark" hidden></div>
       <div id="empty"><div class="box" id="drop">
         <h2>Drop a CSV / TSV file here</h2>
         <p>or click to open · or paste text (Ctrl+V)</p>
@@ -239,6 +251,7 @@ dialog { border-radius: 14px; }
   <div id="status"><span id="st1">Ready</span><span id="st2"></span></div>
 </div>
 <dialog id="dlg"><header><h3 id="dh"></h3><button id="dx">Close</button></header><div id="dbody"></div></dialog>
+<div id="cmenu" role="menu" hidden></div>
 <div id="toast"></div>
 <script>
 "use strict";
@@ -349,7 +362,7 @@ async function loadText(text, name, size) {
   if (!ix) return;
   if (!ix.n) { setProg(null, "The file is empty"); return; }
   T = {name, size, text, st: ix.st, en: ix.en, nRec: ix.n, base: 1, delim: ",", cols: [], nc: 0, widths: [], colX: [], totalW: 0,
-       colCache: new Map(), typed: new Map(), types: [], dmy: [], sets: [], hidden: [], tr: null, sort: null, filters: [], order: null, orderKey: "", view: null, nView: 0, sel: null};
+       colCache: new Map(), typed: new Map(), types: [], dmy: [], sets: [], hidden: [], ord: [], pos: [], tr: null, sort: null, filters: [], order: null, orderKey: "", view: null, nView: 0, sel: null};
   $("fname").textContent = name;
   $("fname").title = name;
   $("hdr").checked = true; $("dsel").value = ""; $("q").value = "";
@@ -401,6 +414,7 @@ function configure() {
   }
   t.widths = mx.map(l => Math.max(96, Math.min(420, Math.round(l * 7.2 + 28))));
   t.colCache = new Map(); t.typed = new Map(); t.sort = null; t.filters = new Array(nc).fill(""); t.sets = new Array(nc).fill(null); t.hidden = new Array(nc).fill(false); t.tr = null;
+  t.ord = Array.from({length: nc}, (_, c) => c); t.pos = t.ord.slice();      // display order: position -> column, and column -> position
   t.order = null; t.orderKey = ""; t.sel = null;
   // type inference on a sample (first rows + evenly spaced rows)
   const nD = nData(t), samples = Array.from({length: nc}, () => []);
@@ -423,7 +437,7 @@ function buildHeader() {
   hin.textContent = "";
   t.cols.forEach((name, c) => {
     const h = document.createElement("div");
-    h.className = "hc"; h.dataset.c = c; h.title = name;
+    h.className = "hc"; h.dataset.c = c; h.title = name + "\nClick: sort · drag: move · right-click: hide, move, more";
     h.innerHTML = '<span class="nm">' + esc(name) + '</span><span class="ar"></span><span class="ty" data-c="' + c + '"></span><button class="sg" title="Column statistics (top values)" aria-label="Statistics">Σ</button><span class="rz" data-c="' + c + '"></span>';
     hin.appendChild(h);
     const f = document.createElement("div");
@@ -435,8 +449,33 @@ function buildHeader() {
 }
 function layoutCols() {
   const t = T; let x = 0;
-  t.colX = t.widths.map((w, c) => { const p = x; if (!t.hidden[c]) x += w; return p; });
+  t.colX = new Array(t.nc);
+  for (const c of t.ord) { t.colX[c] = x; if (!t.hidden[c]) x += t.widths[c]; }      // a hidden column sits at the start of the next visible one
   t.totalW = GUTTER + x;
+}
+// move column c to display position `to` (an insertion index in the current order, 0..nc)
+function moveCol(c, to) {
+  const t = T, from = t.pos[c];
+  if (to > from) to--;
+  if (to === from) return;
+  t.ord.splice(from, 1); t.ord.splice(to, 0, c);
+  t.ord.forEach((k, p) => { t.pos[k] = p; });
+  colsChanged();
+}
+function resetColOrder() { T.ord.sort((a, b) => a - b); T.ord.forEach((k, p) => { T.pos[k] = p; }); colsChanged(); }
+const orderChanged = () => T.ord.some((c, p) => c !== p);
+// after hiding / showing / moving columns
+function colsChanged() {
+  const t = T;
+  if (!t.hidden.includes(false)) t.hidden[t.ord[0]] = false;           // never hide every column
+  if (t.sel && t.hidden[t.sel.c]) t.sel = null;
+  layoutHeader(); updateSpacer(); render(); updateStatus(); showDetail();
+}
+function hideCol(c) {
+  if (T.hidden.filter(h => !h).length <= 1) { toast("Cannot hide the last visible column"); return; }
+  T.hidden[c] = true; colsChanged();
+  const n = T.hidden.filter(Boolean).length;
+  toast("Hid “" + T.cols[c] + "” · " + n + " hidden (right-click a header to show them again)", 2600);
 }
 function layoutHeader() {
   const t = T; layoutCols();
@@ -457,22 +496,66 @@ function layoutHeader() {
 }
 function syncHead() { $("hin").style.transform = "translateX(" + (-$("scroller").scrollLeft) + "px)"; }
 
-let drag = null;
+let drag = null, colDrag = null, noClick = false;
 $("hin").addEventListener("pointerdown", e => {
+  noClick = false;
+  if (e.button !== 0) return;
   const rz = e.target.closest(".rz");
-  if (!rz) return;
+  if (!rz) {                                      // press on a header: becomes a column move once the pointer travels a few px
+    const h = e.target.closest(".hc");
+    if (h && !e.target.closest(".sg, .ty")) colDrag = {c: +h.dataset.c, el: h, x0: e.clientX, sl0: $("scroller").scrollLeft, id: e.pointerId, on: false};
+    return;
+  }
   e.preventDefault(); e.stopPropagation();
   rz.setPointerCapture(e.pointerId); rz.classList.add("drag");
   drag = {c: +rz.dataset.c, x: e.clientX, w: T.widths[+rz.dataset.c], el: rz};
 });
 $("hin").addEventListener("pointermove", e => {
+  if (colDrag && !colDrag.on && !e.buttons) colDrag = null;      // released outside the header before the move started
+  if (colDrag) { colDrag.last = e; colMoveStep(e); return; }
   if (!drag) return;
   T.widths[drag.c] = Math.max(40, Math.min(2000, drag.w + e.clientX - drag.x));
   layoutHeader(); render();
 });
-const endDrag = () => { if (drag) { drag.el.classList.remove("drag"); drag = null; } };
+// insertion index (0..nc, in display order) for a pointer at clientX: before the first visible column whose middle is right of the pointer
+function colDropAt(clientX) {
+  const t = T, x = clientX - $("main").getBoundingClientRect().left - GUTTER + $("scroller").scrollLeft;
+  let ins = t.nc;
+  for (let p = 0; p < t.nc; p++) { const c = t.ord[p]; if (!t.hidden[c] && x < t.colX[c] + t.widths[c] / 2) { ins = p; break; } }
+  return ins;
+}
+function colMoveStep(e) {
+  const d = colDrag, sc = $("scroller");
+  if (!d.on) {
+    if (Math.abs(e.clientX - d.x0) < 6) return;
+    d.on = true; noClick = true;
+    try { d.el.setPointerCapture(d.id); } catch (err) {}
+    d.el.classList.add("mv"); document.body.classList.add("colmv"); $("dropmark").hidden = false;
+    clearInterval(dragTimer);
+    dragTimer = setInterval(() => { if (colDrag && colDrag.last) colMoveStep(colDrag.last); }, 50);
+  }
+  const r = sc.getBoundingClientRect();                     // auto-scroll near the edges
+  if (e.clientX < r.left + GUTTER + 30) sc.scrollLeft -= 20; else if (e.clientX > r.right - 30) sc.scrollLeft += 20;
+  syncHead();
+  d.el.style.transform = "translateX(" + (e.clientX - d.x0 + sc.scrollLeft - d.sl0) + "px)";
+  const ins = colDropAt(e.clientX), t = T;
+  const bx = ins < t.nc ? t.colX[t.ord[ins]] : t.totalW - GUTTER;
+  $("dropmark").style.left = GUTTER + bx - sc.scrollLeft + "px";
+  d.ins = ins;
+}
+const endDrag = () => {
+  if (colDrag) {
+    const d = colDrag; colDrag = null;
+    clearInterval(dragTimer);
+    if (d.on) {
+      d.el.classList.remove("mv"); d.el.style.transform = ""; document.body.classList.remove("colmv"); $("dropmark").hidden = true;
+      if (d.ins != null) moveCol(d.c, d.ins);
+    }
+  }
+  if (drag) { drag.el.classList.remove("drag"); drag = null; }
+};
 $("hin").addEventListener("pointerup", endDrag);
-$("hin").addEventListener("pointercancel", endDrag);
+$("hin").addEventListener("pointercancel", e => { if (colDrag) colDrag.ins = null; endDrag(); });
 $("hin").addEventListener("dblclick", e => {
   const rz = e.target.closest(".rz");
   if (!rz) return;
@@ -482,6 +565,7 @@ $("hin").addEventListener("dblclick", e => {
   layoutHeader(); render();
 });
 $("hin").addEventListener("click", e => {
+  if (noClick) { noClick = false; return; }       // the press was a column move, not a sort
   const vp = e.target.closest(".vp");
   if (vp) { showStats(+vp.closest(".fc").dataset.c); return; }
   if (e.target.closest(".rz") || e.target.closest(".fc")) return;
@@ -504,7 +588,60 @@ $("hin").addEventListener("click", e => {
 });
 $("hin").addEventListener("contextmenu", e => {
   const h = e.target.closest(".hc");
-  if (h) { e.preventDefault(); showStats(+h.dataset.c); }
+  if (h) { e.preventDefault(); showColMenu(+h.dataset.c, e.clientX, e.clientY); }
+});
+
+// ---- header context menu: sort, hide, move, statistics
+function showColMenu(c, x, y) {
+  const t = T, p = t.pos[c], vis = t.ord.filter(k => !t.hidden[k]), vp = vis.indexOf(c);
+  const nHidden = t.hidden.filter(Boolean).length, s = t.sort;
+  const items = [
+    ["sa", "Sort ascending", s && s.c === c && s.dir > 0], ["sd", "Sort descending", s && s.c === c && s.dir < 0], ["sx", "Clear sort", !s], null,
+    ["hide", "Hide column", vis.length <= 1], ["show", "Show all hidden columns" + (nHidden ? " (" + nHidden + ")" : ""), !nHidden], ["cols", "Choose columns…"], null,
+    ["ml", "Move left", vp <= 0], ["mr", "Move right", vp >= vis.length - 1], ["mh", "Move to start", vp <= 0], ["me", "Move to end", vp >= vis.length - 1],
+    ["mreset", "Reset column order", !orderChanged()], null,
+    ["stats", "Statistics / pick values…"], ["copy", "Copy column name"],
+  ];
+  const m = $("cmenu");
+  m.innerHTML = '<div class="mh">' + esc(t.cols[c]) + "</div>" + items.map(it => !it ? "<hr>" :
+    '<button role="menuitem" data-a="' + it[0] + '"' + (it[2] ? " disabled" : "") + ">" + esc(it[1]) + "</button>").join("");
+  m.onclick = e => {
+    const b = e.target.closest("button");
+    if (!b || b.disabled) return;
+    hideColMenu();
+    switch (b.dataset.a) {
+      case "sa": case "sd": t.sort = {c, dir: b.dataset.a === "sa" ? 1 : -1}; layoutHeader(); refresh(); break;
+      case "sx": t.sort = null; layoutHeader(); refresh(); break;
+      case "hide": hideCol(c); break;
+      case "show": t.hidden.fill(false); colsChanged(); break;
+      case "cols": showColumns(); break;
+      case "ml": moveCol(c, t.pos[vis[vp - 1]]); break;
+      case "mr": moveCol(c, t.pos[vis[vp + 1]] + 1); break;
+      case "mh": moveCol(c, 0); break;
+      case "me": moveCol(c, t.nc); break;
+      case "mreset": resetColOrder(); break;
+      case "stats": showStats(c); break;
+      case "copy": copyText(t.cols[c]); break;
+    }
+  };
+  m.hidden = false;
+  const W = m.offsetWidth, H = m.offsetHeight;
+  m.style.left = Math.max(4, Math.min(x, innerWidth - W - 4)) + "px";
+  m.style.top = Math.max(4, Math.min(y, innerHeight - H - 4)) + "px";
+  const first = m.querySelector("button:not(:disabled)"); if (first) first.focus({preventScroll: true});
+}
+function hideColMenu() { if (!$("cmenu").hidden) { $("cmenu").hidden = true; if (T) $("scroller").focus({preventScroll: true}); } }
+window.addEventListener("pointerdown", e => { if (!e.target.closest("#cmenu")) hideColMenu(); }, true);
+window.addEventListener("blur", hideColMenu);
+window.addEventListener("resize", hideColMenu);
+$("scroller").addEventListener("scroll", hideColMenu);
+$("cmenu").addEventListener("contextmenu", e => e.preventDefault());
+$("cmenu").addEventListener("keydown", e => {
+  const bs = [...$("cmenu").querySelectorAll("button:not(:disabled)")], i = bs.indexOf(document.activeElement);
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideColMenu(); }
+  else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); bs[(i + (e.key === "ArrowDown" ? 1 : bs.length - 1)) % bs.length].focus(); }
+  else if (e.key === "Home" || e.key === "End") { e.preventDefault(); bs[e.key === "Home" ? 0 : bs.length - 1].focus(); }
+  else if (e.key === "Tab") { e.preventDefault(); hideColMenu(); }
 });
 let ftimer = 0;
 $("hin").addEventListener("input", e => {
@@ -854,23 +991,25 @@ function render() {
   const layer = $("layer");
   layer.style.height = vh + "px"; layer.style.width = vw + "px";
   const nRows = Math.ceil(vh / ROW_H) + 2;
-  // visible columns
-  let c0 = 0, c1 = t.nc - 1;
-  while (c0 < t.nc - 1 && t.colX[c0] + t.widths[c0] <= sl) c0++;
-  while (c1 > c0 && t.colX[c1] >= sl + vw - GUTTER) c1--;
-  const sel = t.sel, box = rangeBox(), multi = box && (box.r1 > box.r0 || box.c1 > box.c0);
+  // visible columns (display positions p0..p1)
+  const {ord, pos} = t;
+  let p0 = 0, p1 = t.nc - 1;
+  while (p0 < t.nc - 1 && t.colX[ord[p0]] + t.widths[ord[p0]] <= sl) p0++;
+  while (p1 > p0 && t.colX[ord[p1]] >= sl + vw - GUTTER) p1--;
+  const sel = t.sel, box = rangeBox(), multi = box && (box.r1 > box.r0 || box.p1 > box.p0);
   let html = "";
   for (let i = 0; i < nRows; i++) {
     const vi = first + i;
     if (vi >= t.nView) break;
     const r = rowAt(vi), cells = rowCells(r), inRow = box && vi >= box.r0 && vi <= box.r1;
     html += '<div class="r' + (vi & 1 ? " odd" : "") + (inRow ? " rsel" : "") + '" style="top:' + (i * ROW_H + off) + 'px" data-vi="' + vi + '">';
-    for (let c = c0; c <= c1; c++) {
+    for (let p = p0; p <= p1; p++) {
+      const c = ord[p];
       if (t.hidden[c]) continue;
       let v = cells[c] || "";
       const lim = ROW_H > 26 ? 1200 : 300;
       if (v.length > lim) v = v.slice(0, lim) + "…";
-      html += '<div class="c' + (t.types[c] === "int" || t.types[c] === "float" ? " n" : "") + (sel && sel.vi === vi && sel.c === c ? " sel" : multi && inRow && c >= box.c0 && c <= box.c1 ? " rg" : "") + '" data-c="' + c + '" style="left:' + (GUTTER + t.colX[c] - sl) + "px;width:" + t.widths[c] + 'px">' + hlHtml(v) + "</div>";
+      html += '<div class="c' + (t.types[c] === "int" || t.types[c] === "float" ? " n" : "") + (sel && sel.vi === vi && sel.c === c ? " sel" : multi && inRow && p >= box.p0 && p <= box.p1 ? " rg" : "") + '" data-c="' + c + '" style="left:' + (GUTTER + t.colX[c] - sl) + "px;width:" + t.widths[c] + 'px">' + hlHtml(v) + "</div>";
     }
     html += '<div class="g' + (inRow ? " in" : "") + '">' + fmtN(r + 1) + "</div></div>";
   }
@@ -890,9 +1029,7 @@ function updateStatus() {
 function updateSelStatus() {
   const t = T, s = t && t.sel, b = rangeBox(), st = $("st2");
   if (!s) { st.textContent = ""; return; }
-  const multi = b.r1 > b.r0 || b.c1 > b.c0;
-  let ncols = 0;
-  for (let c = b.c0; c <= b.c1; c++) if (!t.hidden[c]) ncols++;
+  const multi = b.r1 > b.r0 || b.p1 > b.p0, ncols = boxCols(b).length;
   const txt = multi ? fmtN(b.r1 - b.r0 + 1) + " rows × " + ncols + " cols selected" : "row " + fmtN(rowAt(s.vi) + 1) + " · " + t.cols[s.c];
   st.innerHTML = "<span>" + esc(txt) + '</span><button id="bcopy" title="Copy as tab-separated text (Ctrl+C). Ctrl+Shift+C adds the column names">Copy' + (multi ? " selection" : " cell") + "</button>";
 }
@@ -902,10 +1039,11 @@ $("st2").addEventListener("click", e => { if (e.target.closest("#bcopy")) { copy
 function rangeBox() {
   const t = T;
   if (!t || !t.sel) return null;
-  const a = t.anc || t.sel;
-  return {r0: Math.min(a.vi, t.sel.vi), r1: Math.max(a.vi, t.sel.vi), c0: Math.min(a.c, t.sel.c), c1: Math.max(a.c, t.sel.c)};
+  const a = t.anc || t.sel, pa = t.pos[a.c], ps = t.pos[t.sel.c];
+  return {r0: Math.min(a.vi, t.sel.vi), r1: Math.max(a.vi, t.sel.vi), p0: Math.min(pa, ps), p1: Math.max(pa, ps)};      // p0..p1: display positions
 }
-const firstVisCol = () => stepCol(-1, 1), lastVisCol = () => stepCol(T.nc, -1);
+const boxCols = b => T.ord.slice(b.p0, b.p1 + 1).filter(c => !T.hidden[c]);       // visible columns of the box, in display order
+const firstVisCol = () => T.ord.find(c => !T.hidden[c]), lastVisCol = () => T.ord.findLast(c => !T.hidden[c]);
 // extend = keep the anchor (shift-click / shift-arrows / drag), otherwise start a new selection
 function select(vi, c, scroll, extend, quiet) {
   const t = T;
@@ -938,7 +1076,7 @@ function hitCell(e) {
   const vi = Math.max(0, Math.min(t.nView - 1, first + Math.floor((e.clientY - r.top - off) / ROW_H)));
   const x = e.clientX - r.left + sl - GUTTER;
   let c = firstVisCol();
-  for (let k = 0; k < t.nc; k++) if (!t.hidden[k] && t.colX[k] <= x) c = k;
+  for (const k of t.ord) if (!t.hidden[k] && t.colX[k] <= x) c = k;
   return {vi, c};
 }
 function dragStep(e) {
@@ -977,10 +1115,10 @@ $("layer").addEventListener("pointerup", endSel);
 $("layer").addEventListener("pointercancel", endSel);
 $("layer").addEventListener("dblclick", e => { if (e.target.closest(".c")) copyCell(); });
 
-function stepCol(c, d) {          // next visible column from c in direction d (stays put at the edges)
-  let k = c + d;
-  while (k >= 0 && k < T.nc && T.hidden[k]) k += d;
-  return k < 0 || k >= T.nc ? Math.max(0, Math.min(T.nc - 1, c)) : k;
+function stepCol(c, d) {          // next visible column from c in display direction d (stays put at the edges)
+  const t = T;
+  for (let p = t.pos[c] + d; p >= 0 && p < t.nc; p += d) if (!t.hidden[t.ord[p]]) return t.ord[p];
+  return c;
 }
 function cellValue(sel) { return rowCells(rowAt(sel.vi))[sel.c] || ""; }
 function copyText(s) {
@@ -999,8 +1137,7 @@ function copyCell() { if (T && T.sel) copyText(cellValue(T.sel)); }
 function copyRange(withHeader) {
   const t = T, b = rangeBox();
   if (!b) return;
-  const cols = [];
-  for (let c = b.c0; c <= b.c1; c++) if (!t.hidden[c]) cols.push(c);
+  const cols = boxCols(b);
   const nRows = b.r1 - b.r0 + 1;
   if (nRows * cols.length > 5e6) { toast("Selection too large to copy (" + fmtN(nRows * cols.length) + " cells)"); return; }
   if (nRows === 1 && cols.length === 1 && !withHeader) { copyText(cellValue({vi: b.r0, c: cols[0]})); return; }
@@ -1012,7 +1149,7 @@ function copyRange(withHeader) {
   toast("Copied " + fmtN(nRows) + " rows × " + cols.length + " cols" + (withHeader ? " with headers" : ""));
 }
 let tt = 0;
-function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(tt); tt = setTimeout(() => t.classList.remove("show"), 1100); }
+function toast(m, ms) { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(tt); tt = setTimeout(() => t.classList.remove("show"), ms || 1100); }
 
 $("scroller").addEventListener("keydown", e => {
   const t = T;
@@ -1026,8 +1163,8 @@ $("scroller").addEventListener("keydown", e => {
     case "ArrowLeft": c = stepCol(c, -1); break;
     case "PageDown": vi += page; break;
     case "PageUp": vi -= page; break;
-    case "Home": if (e.ctrlKey) vi = 0; else c = stepCol(-1, 1); break;
-    case "End": if (e.ctrlKey) vi = t.nView - 1; else c = stepCol(T.nc, -1); break;
+    case "Home": if (e.ctrlKey) vi = 0; else c = firstVisCol(); break;
+    case "End": if (e.ctrlKey) vi = t.nView - 1; else c = lastVisCol(); break;
     case "Enter": toggleDetail(); return;
     case "c": case "C": if (e.ctrlKey || e.metaKey) { copyRange(e.shiftKey); e.preventDefault(); } return;
     case "a": case "A":
@@ -1060,7 +1197,7 @@ function showDetail() {
   const r = rowAt(t.sel.vi), cells = rowCells(r);
   $("dtitle").textContent = "Row " + fmtN(r + 1);
   let h = "";
-  for (let c = 0; c < t.nc; c++) h += '<div class="kv' + (c === t.sel.c ? " cur" : "") + '" data-c="' + c + '"><div class="k">' + esc(t.cols[c]) + '</div><div class="v">' + esc(cells[c] || "") + "</div>" + utcLine(c, cells[c] || "") + "</div>";
+  for (const c of t.ord) h += '<div class="kv' + (c === t.sel.c ? " cur" : "") + '" data-c="' + c + '"><div class="k">' + esc(t.cols[c]) + '</div><div class="v">' + esc(cells[c] || "") + "</div>" + utcLine(c, cells[c] || "") + "</div>";
   list.innerHTML = h;
   const cur = list.querySelector(".cur"); if (cur) cur.scrollIntoView({block: "nearest"});
 }
@@ -1144,24 +1281,22 @@ function showColumns() {
   $("dh").textContent = "Columns to show";
   $("dbody").onclick = null;
   $("dbody").innerHTML = '<div class="ctl"><input type="search" id="cq" placeholder="Search columns…" aria-label="Search columns"></div>' +
-    '<div class="ctl"><button id="call">Show all</button><button id="cnone">Hide all</button><button id="cinv">Invert</button></div>' +
+    '<div class="ctl"><button id="call">Show all</button><button id="cnone">Hide all</button><button id="cinv">Invert</button><span class="sp"></span><button id="creset" title="Put the columns back in file order">Reset order</button></div>' +
     '<p class="hint" id="chint"></p><div id="clist"></div>';
-  const apply = () => {
-    if (!t.hidden.includes(false)) t.hidden[0] = false;           // never hide every column
-    if (t.sel && t.hidden[t.sel.c]) t.sel = null;
-    layoutHeader(); updateSpacer(); render(); updateStatus(); showDetail(); list();
-  };
+  const apply = () => { colsChanged(); list(); };
   const list = () => {
     const q = query.toLowerCase();
     let h = "";
-    t.cols.forEach((name, c) => {
+    t.ord.forEach(c => {
+      const name = t.cols[c];
       if (q && !name.toLowerCase().includes(q)) return;
       const note = (t.filters[c] || t.sets[c]) ? " · filtered" : "";
       h += '<label class="sr"><span class="val"><input type="checkbox" data-c="' + c + '"' + (t.hidden[c] ? "" : " checked") + "> " + esc(name) +
         '</span><span class="n">' + TYPE_LABEL[t.types[c]] + note + "</span></label>";
     });
     $("clist").innerHTML = h || '<p class="hint">No column matches.</p>';
-    $("chint").textContent = t.hidden.filter(x => !x).length + " of " + t.nc + " columns shown · applies to the grid and to “Export view”";
+    $("chint").textContent = t.hidden.filter(x => !x).length + " of " + t.nc + " columns shown · applies to the grid and to “Export view” · drag a header to reorder, right-click it for more";
+    $("creset").disabled = !orderChanged();
   };
   const forMatching = fn => { const q = query.toLowerCase(); t.cols.forEach((name, c) => { if (!q || name.toLowerCase().includes(q)) t.hidden[c] = fn(t.hidden[c]); }); apply(); };
   $("clist").onchange = e => { const cb = e.target.closest("input[type=checkbox]"); if (!cb) return; t.hidden[+cb.dataset.c] = !cb.checked; apply(); };
@@ -1169,6 +1304,7 @@ function showColumns() {
   $("call").onclick = () => forMatching(() => false);
   $("cnone").onclick = () => forMatching(() => true);
   $("cinv").onclick = () => forMatching(h => !h);
+  $("creset").onclick = () => { resetColOrder(); list(); };
   list();
   $("dlg").showModal();
 }
@@ -1440,9 +1576,8 @@ $("dsel").addEventListener("change", () => T && configure());
 $("bexp").addEventListener("click", () => {
   const t = T;
   if (!t) return;
-  const parts = [], vis = [];
-  for (let c = 0; c < t.nc; c++) if (!t.hidden[c]) vis.push(c);
-  if (vis.length === t.nc) {                         // all columns: keep the original text byte for byte
+  const parts = [], vis = t.ord.filter(c => !t.hidden[c]);
+  if (vis.length === t.nc && !orderChanged()) {      // all columns in file order: keep the original text byte for byte
     if (t.base) parts.push(t.text.slice(t.st[0], t.en[0]));
     for (let i = 0; i < t.nView; i++) parts.push(recStr(rowAt(i)));
   } else {                                           // subset of columns: rebuild the lines with proper quoting
