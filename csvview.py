@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""csvview.py - open CSV / TSV files in the fast local viewer (csv_viewer.html) from the terminal.
+"""csvview.py - open CSV / TSV files in the fast local viewer (index.html) from the terminal.
 
     csvview.py data.csv [more.tsv ...]        one browser tab per file
     csvview.py timeline.csv.gz                .gz and .zst are decompressed on the fly
@@ -27,7 +27,7 @@ import webbrowser
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-VIEWER = HERE / "csv_viewer.html"
+VIEWER = HERE / "index.html"
 
 
 def open_source(path):

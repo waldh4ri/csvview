@@ -5,6 +5,7 @@ Fast, fully client-side CSV/TSV viewer. Nothing is uploaded: files are parsed in
 **Live:** https://waldh4ri.github.io/csvview/
 
 - Millions of rows (virtual scrolling), search (plain/regex), per-column filters and value pickers
+- Files larger than 500 MB: the text is indexed while it streams in and kept in 128M-char chunks, so the limit is your RAM (an 890 MB / 8M-row file loads in ~10 s and uses ~2 GB)
 - Automatic integer / decimal / timestamp detection with typed sorting and range filters
 - Column resize, reorder (drag a header) and hide; right-click a header for sort / hide / move / stats
 - Row details panel, export of the filtered view (respects column order and hidden columns)

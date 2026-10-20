@@ -302,43 +302,61 @@ function setProg(f, label) {
   if (label) $("st1").textContent = label;
 }
 
-async function indexRecords(text, isCurrent) {
-  let cap = 1 << 20, st = new Float64Array(cap), en = new Float64Array(cap), n = 0;
-  const L = text.length;
-  let i = 0, start = 0, inQ = false;
+// Incremental record indexer, fed with the decoded text piece by piece while the file streams in.
+// One JS string cannot exceed ~512 M chars, so the text is kept as several chunk strings of about CHUNK chars, always cut on a
+// record boundary: record i is texts[ck[i]].slice(st[i], en[i]). Files of several GB load as long as there is enough RAM.
+const CHUNK = 1 << 27;
+function makeIndexer() {
+  let cap = 1 << 20, st = new Float64Array(cap), en = new Float64Array(cap), ck = new Uint16Array(cap), n = 0;
+  const texts = [];
+  let pend = [], len = 0, start = 0, inQ = false, lastCR = false, bom = true;
   const push = (a, b) => {
     if (b <= a) return;
     if (n === cap) {
       cap *= 2;
-      const s2 = new Float64Array(cap), e2 = new Float64Array(cap);
-      s2.set(st); e2.set(en); st = s2; en = e2;
+      const s2 = new Float64Array(cap), e2 = new Float64Array(cap), k2 = new Uint16Array(cap);
+      s2.set(st); e2.set(en); k2.set(ck); st = s2; en = e2; ck = k2;
     }
-    st[n] = a; en[n] = b; n++;
+    st[n] = a; en[n] = b; ck[n] = texts.length; n++;
   };
-  while (i < L) {
-    const lim = Math.min(L, i + 4000000);
-    for (; i < lim; i++) {
-      const c = text.charCodeAt(i);
-      if (c === 34) inQ = !inQ;
-      else if (c === 10 && !inQ) {
-        let e = i;
-        if (e > start && text.charCodeAt(e - 1) === 13) e--;
-        push(start, e); start = i + 1;
+  const cut = () => {                 // close the current chunk; the unfinished record at its end moves to the next one
+    const all = pend.join("");
+    texts.push(all);
+    const tail = all.slice(start);
+    pend = [tail]; len = tail.length; start = 0;
+  };
+  return {
+    get n() { return n; },
+    feed(s) {
+      if (bom) { bom = false; if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1); }
+      if (!s) return;
+      if (len + s.length > CHUNK && start > 0) cut();
+      const o = len;
+      for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        if (c === 34) inQ = !inQ;
+        else if (c === 10 && !inQ) {
+          let e = o + i;
+          if (e > start && (i ? s.charCodeAt(i - 1) === 13 : lastCR)) e--;
+          push(start, e); start = o + i + 1;
+        }
       }
-    }
-    setProg(0.4 + 0.6 * i / L, "Indexing… " + fmtN(n) + " rows");
-    await tick();
-    if (!isCurrent()) return null;
-  }
-  if (start < L) { let e = L; if (text.charCodeAt(e - 1) === 13) e--; push(start, e); }
-  return {st: st.subarray(0, n), en: en.subarray(0, n), n};
+      lastCR = s.charCodeAt(s.length - 1) === 13;
+      pend.push(s); len += s.length;
+    },
+    finish() {
+      if (start < len) push(start, lastCR ? len - 1 : len);
+      texts.push(pend.join("")); pend = [];
+      return {texts, st: st.subarray(0, n), en: en.subarray(0, n), ck: ck.subarray(0, n), n};
+    },
+  };
 }
 
 function detectDelim(t) {
   let best = ",", bestScore = -1;
   for (const d of [",", ";", "\t", "|"]) {
     const cnt = [];
-    for (let r = 0; r < Math.min(10, t.nRec); r++) cnt.push(parseRow(t.text.slice(t.st[r], t.en[r]), d).length);
+    for (let r = 0; r < Math.min(10, t.nRec); r++) cnt.push(parseRow(rec(t, r), d).length);
     const first = cnt[0];
     if (first < 2) continue;
     const score = first * (cnt.every(x => x === first) ? 1000 : 1) * (cnt.filter(x => x === first).length);
@@ -349,19 +367,21 @@ function detectDelim(t) {
 
 // ---------------------------------------------------------------- dataset
 const nData = t => t.nRec - t.base;
-const recStr = r => T.text.slice(T.st[r + T.base], T.en[r + T.base]);
+const rec = (t, i) => t.texts[t.ck[i]].slice(t.st[i], t.en[i]);      // raw record i (the header line included)
+const recStr = r => rec(T, r + T.base);
 const rowCells = r => parseRow(recStr(r), T.delim);
 const rowAt = vi => T.view ? T.view[vi] : vi;
 
-async function loadText(text, name, size) {
-  const g = ++loadGen;
+function loadText(text, name, size) {
+  ++loadGen;
+  const ix = makeIndexer();
+  ix.feed(text);
+  loadIndexed(ix.finish(), name, size);
+}
+function loadIndexed(ix, name, size) {
   gen++;
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-  setProg(0.4, "Indexing…");
-  const ix = await indexRecords(text, () => g === loadGen);
-  if (!ix) return;
   if (!ix.n) { setProg(null, "The file is empty"); return; }
-  T = {name, size, text, st: ix.st, en: ix.en, nRec: ix.n, base: 1, delim: ",", cols: [], nc: 0, widths: [], colX: [], totalW: 0,
+  T = {name, size, texts: ix.texts, st: ix.st, en: ix.en, ck: ix.ck, nRec: ix.n, base: 1, delim: ",", cols: [], nc: 0, widths: [], colX: [], totalW: 0,
        colCache: new Map(), typed: new Map(), types: [], dmy: [], sets: [], hidden: [], ord: [], pos: [], tr: null, sort: null, filters: [], order: null, orderKey: "", view: null, nView: 0, sel: null};
   $("fname").textContent = name;
   $("fname").title = name;
@@ -377,21 +397,26 @@ const openFile = file => readStream(file.stream(), file.size, file.name);
 async function readStream(body, size, name) {
   const g = ++loadGen;
   setProg(0.01, "Reading " + name + "…");
-  const reader = body.getReader(), dec = new TextDecoder("utf-8");
-  const parts = []; let got = 0;
-  for (;;) {
-    const {done, value} = await reader.read();
-    if (done) break;
-    parts.push(dec.decode(value, {stream: true}));
-    got += value.length;
-    setProg(size ? 0.4 * got / size : 0.2, "Reading " + name + "… " + fmtB(got));
-    if (g !== loadGen) { reader.cancel(); return; }
+  const reader = body.getReader(), dec = new TextDecoder("utf-8"), ix = makeIndexer();
+  let got = 0, last = 0;
+  try {
+    for (;;) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      ix.feed(dec.decode(value, {stream: true}));
+      got += value.length;
+      if (g !== loadGen) { reader.cancel(); return; }
+      const now = performance.now();
+      if (now - last > 100) { last = now; setProg(size ? got / size : 0.5, "Reading " + name + "… " + fmtB(got) + (size ? " of " + fmtB(size) : "") + " · " + fmtN(ix.n) + " rows"); }
+    }
+    ix.feed(dec.decode());
+    if (g !== loadGen) return;
+    loadIndexed(ix.finish(), name, size || got);
+  } catch (e) {
+    if (g !== loadGen) return;
+    setProg(null, e instanceof RangeError ? "Out of memory after " + fmtB(got) + ": the browser cannot hold this file. Try Chrome / Edge 64-bit, close other tabs, or split it (e.g. split -l)."
+      : "Could not read " + name + ": " + e);
   }
-  parts.push(dec.decode());
-  let text;
-  try { text = parts.join(""); }
-  catch (e) { setProg(null, "File too large for the browser (about 500 MB of text). Split it first (e.g. split -l) or use a desktop tool."); return; }
-  await loadText(text, name, size || got);
 }
 
 function configure() {
@@ -402,14 +427,14 @@ function configure() {
   t.delim = dsel || detectDelim(t);
   let nc = 0;
   const lim = Math.min(t.nRec, 500);
-  for (let r = 0; r < lim; r++) nc = Math.max(nc, parseRow(t.text.slice(t.st[r], t.en[r]), t.delim).length);
+  for (let r = 0; r < lim; r++) nc = Math.max(nc, parseRow(rec(t, r), t.delim).length);
   t.nc = nc;
-  const head = t.base ? parseRow(t.text.slice(t.st[0], t.en[0]), t.delim) : [];
+  const head = t.base ? parseRow(rec(t, 0), t.delim) : [];
   t.cols = Array.from({length: nc}, (_, c) => (head[c] || "").trim() || "col " + (c + 1));
   // widths from header + first rows
   const mx = t.cols.map(n => n.length + 7);
   for (let r = 0; r < Math.min(nData(t), 200); r++) {
-    const cells = parseRow(t.text.slice(t.st[r + t.base], t.en[r + t.base]), t.delim);
+    const cells = parseRow(rec(t, r + t.base), t.delim);
     for (let c = 0; c < nc; c++) { const l = (cells[c] || "").length; if (l > mx[c]) mx[c] = l; }
   }
   t.widths = mx.map(l => Math.max(96, Math.min(420, Math.round(l * 7.2 + 28))));
@@ -420,7 +445,7 @@ function configure() {
   const nD = nData(t), samples = Array.from({length: nc}, () => []);
   const step = Math.max(1, Math.floor(nD / 1500));
   for (let r = 0; r < nD; r += (r < 500 ? 1 : step)) {
-    const cells = parseRow(t.text.slice(t.st[r + t.base], t.en[r + t.base]), t.delim);
+    const cells = parseRow(rec(t, r + t.base), t.delim);
     for (let c = 0; c < nc; c++) samples[c].push(cells[c] || "");
   }
   t.types = []; t.dmy = [];
@@ -804,7 +829,7 @@ async function colValues(c, g) {
   const n = nData(t), d = t.delim, out = new Array(n);
   let last = performance.now();
   for (let r = 0; r < n; r++) {
-    const s = t.text.slice(t.st[r + t.base], t.en[r + t.base]);
+    const s = rec(t, r + t.base);
     out[r] = (s.indexOf('"') < 0 ? s.split(d)[c] : parseRow(s, d)[c]) ?? "";
     if ((r & 1023) === 0 && performance.now() - last > 30) {
       setProg(r / n, "Reading column “" + t.cols[c] + "”…");
@@ -850,10 +875,13 @@ async function searchMask(q, g) {
   let re;
   try { re = new RegExp(reOn ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g" + (caseOn ? "" : "i")); $("q").classList.remove("bad"); }
   catch (e) { $("q").classList.add("bad"); return mask; }
-  const CH = 20000, {st, en, base, text} = t;
+  const CH = 20000, {st, en, ck, base, texts} = t;
   let last = performance.now();
-  for (let a = 0; a < n; a += CH) {
-    const b = Math.min(n, a + CH), o = st[a + base], s = text.slice(o, en[b - 1 + base]);
+  for (let a = 0, b; a < n; a = b) {
+    const k = ck[a + base];
+    b = Math.min(n, a + CH);
+    while (ck[b - 1 + base] !== k) b--;                    // a block never spans two text chunks
+    const o = st[a + base], s = texts[k].slice(o, en[b - 1 + base]);
     re.lastIndex = 0;
     let p = a, m;
     while ((m = re.exec(s))) {
@@ -1576,16 +1604,20 @@ $("dsel").addEventListener("change", () => T && configure());
 $("bexp").addEventListener("click", () => {
   const t = T;
   if (!t) return;
-  const parts = [], vis = t.ord.filter(c => !t.hidden[c]);
+  // lines are batched into ~4 M char strings: a single string for the whole export could exceed the browser's string size limit
+  const blobs = [], vis = t.ord.filter(c => !t.hidden[c]);
+  let lines = [], len = 0;
+  const add = s => { lines.push(s); len += s.length; if (len > 4e6) { blobs.push(lines.join("\n") + "\n"); lines = []; len = 0; } };
   if (vis.length === t.nc && !orderChanged()) {      // all columns in file order: keep the original text byte for byte
-    if (t.base) parts.push(t.text.slice(t.st[0], t.en[0]));
-    for (let i = 0; i < t.nView; i++) parts.push(recStr(rowAt(i)));
+    if (t.base) add(rec(t, 0));
+    for (let i = 0; i < t.nView; i++) add(recStr(rowAt(i)));
   } else {                                           // subset of columns: rebuild the lines with proper quoting
     const q = v => /["\n\r]/.test(v) || v.includes(t.delim) ? '"' + v.replace(/"/g, '""') + '"' : v;
-    if (t.base) parts.push(vis.map(c => q(t.cols[c])).join(t.delim));
-    for (let i = 0; i < t.nView; i++) { const cells = rowCells(rowAt(i)); parts.push(vis.map(c => q(cells[c] || "")).join(t.delim)); }
+    if (t.base) add(vis.map(c => q(t.cols[c])).join(t.delim));
+    for (let i = 0; i < t.nView; i++) { const cells = rowCells(rowAt(i)); add(vis.map(c => q(cells[c] || "")).join(t.delim)); }
   }
-  const blob = new Blob([parts.join("\n") + "\n"], {type: "text/csv;charset=utf-8"});
+  if (lines.length) blobs.push(lines.join("\n") + "\n");
+  const blob = new Blob(blobs, {type: "text/csv;charset=utf-8"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = t.name.replace(/\.[^.]+$/, "") + "-view.csv";
