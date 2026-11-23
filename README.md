@@ -6,6 +6,8 @@ Fast, fully client-side CSV/TSV viewer. Nothing is uploaded: files are parsed in
 
 - Millions of rows (virtual scrolling), per-column filters and value pickers
 - Search with `AND` / `OR` / `NOT` (or `-word`), `"phrases"`, `/regex/` terms and `( )` grouping; the `.*` button takes the whole box as one regex
+- IP address columns (v4 / v6) detected automatically: filter or search by subnet (`10.0.0.0/8`, `2001:db8::/32`), range, or class (`private`, `public`, `loopback`…), numeric sort
+- Press `H` (or `?`) for all shortcuts and the search / filter syntax
 - Right-click a cell to copy it, filter its column by its value, or add it to the search (AND / OR / NOT)
 - Files larger than 500 MB: the text is indexed while it streams in and kept in 128M-char chunks, so the limit is your RAM (an 890 MB / 8M-row file loads in ~10 s and uses ~2 GB)
 - Automatic integer / decimal / timestamp detection with typed sorting and range filters

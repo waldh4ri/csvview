@@ -105,6 +105,7 @@ dialog header { flex: none; padding: 12px 16px; border-bottom: 1px solid var(--b
 dialog h3 { margin: 0; font-size: 15px; }
 #dbody { padding: 8px 16px 16px; overflow: auto; flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
 dialog.wide { width: min(900px, 94vw); max-height: 86vh; }
+dialog.big { width: min(1200px, 94vw); max-height: 88vh; }
 #dh { margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #dcopy { display: none; }
 dialog.wide #dcopy { display: inline-block; }
@@ -197,6 +198,14 @@ body.colmv, body.colmv * { cursor: grabbing !important; }
 #cmenu button:hover, #cmenu button:focus-visible { background: var(--hover); outline: none; }
 #cmenu button:disabled { color: var(--muted); cursor: default; background: transparent; transform: none; }
 #cmenu button kbd { font: 11px var(--mono); color: var(--muted); }
+dialog.help { width: min(900px, 94vw); max-height: 88vh; }
+.help h4 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.help table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.help td { padding: 3px 8px 3px 0; vertical-align: top; border-bottom: 1px solid var(--grid); }
+.help td:first-child { width: 52%; padding-right: 14px; line-height: 1.8; }
+.help kbd, .help code { font: 12px var(--mono); background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; white-space: nowrap; }
+.help .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
+@media (max-width: 720px) { .help .cols { grid-template-columns: 1fr; } }
 #cmenu .ms { padding: 6px 10px 2px; color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
 #cmenu hr { border: 0; border-top: 1px solid var(--grid); margin: 4px 2px; }
 </style>
@@ -220,6 +229,7 @@ body.colmv, body.colmv * { cursor: grabbing !important; }
     <button id="bdet" title="Row details (D or Enter)" disabled>Details</button>
     <button id="bexp" disabled>Export view</button>
     <button id="bthm" title="Toggle theme">Theme</button>
+    <button id="bhelp" title="Shortcuts and search syntax (H)">?</button>
     <button id="bopen">Open…</button>
     <input type="file" id="file" accept=".csv,.tsv,.txt,.tab,.log,text/*" hidden>
   </div>
@@ -474,7 +484,7 @@ function buildHeader() {
     hin.appendChild(h);
     const f = document.createElement("div");
     f.className = "fc"; f.dataset.c = c;
-    f.innerHTML = '<input type="text" placeholder="filter" spellcheck="false" aria-label="Filter ' + esc(name) + '" title="text · =exact · !not · &gt;5 · &gt;=2026-09-28 · 10..20 · 2026-09-28..2026-09-30 · /regex/ · = (empty) · ! (non-empty)"><button class="vp" title="Pick the values to keep (checkbox list)" aria-label="Pick values">☰</button>';
+    f.innerHTML = '<input type="text" placeholder="filter" spellcheck="false" aria-label="Filter ' + esc(name) + '" title="text · =exact · !not · &gt;5 · &gt;=2026-09-28 · 10..20 · 2026-09-28..2026-09-30 · /regex/ · = (empty) · ! (non-empty)&#10;IP columns: 10.0.0.0/8 · 192.168.1.10 · 10.0.0.1..10.0.0.50 · private · public · loopback · multicast (several = any)"><button class="vp" title="Pick the values to keep (checkbox list)" aria-label="Pick values">☰</button>';
     hin.appendChild(f);
   });
   layoutHeader();
@@ -753,9 +763,100 @@ const RE_INT = /^[+-]?(0|[1-9]\d{0,17})$/;
 const RE_FLOAT = /^[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?$/;
 const RE_ISO = /^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?\s*(Z|UTC|[+-]\d{2}:?\d{2})?)?$/i;
 const RE_DMY = /^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?\s*(AM|PM)?\s*(Z|UTC|[+-]\d{2}:?\d{2})?)?$/i;
-const TYPE_LABEL = {int: "123", float: "1.5", time: "ts", epoch: "ep", str: "abc"};
-const TYPE_NAME = {int: "integer", float: "decimal number", time: "timestamp", epoch: "epoch timestamp (s / ms / µs / ns since 1970)", str: "text"};
-const TYPE_CYCLE = ["int", "float", "time", "epoch", "str"];
+// ---- IP addresses: {v:4, n} or {v:6, h:[4 x uint32]}; IPv4-mapped IPv6 (::ffff:a.b.c.d) counts as IPv4
+const RE_IP4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+function ip4num(s) {
+  const m = RE_IP4.exec(s);
+  if (!m) return -1;
+  let n = 0;
+  for (let i = 1; i <= 4; i++) { const b = +m[i]; if (b > 255) return -1; n = n * 256 + b; }
+  return n;
+}
+function ip6words(s) {
+  const pc = s.indexOf("%"); if (pc >= 0) s = s.slice(0, pc);          // zone id: fe80::1%eth0
+  if (!/^[0-9a-f:.]+$/i.test(s) || s.indexOf(":") < 0) return null;
+  let tail = [];
+  const lc = s.lastIndexOf(":"), last = s.slice(lc + 1);
+  if (last.includes(".")) {                                             // embedded IPv4: ::ffff:1.2.3.4
+    const n = ip4num(last); if (n < 0) return null;
+    tail = [Math.floor(n / 65536), n % 65536];
+    s = s.slice(0, lc + 1);
+    if (!s.endsWith("::")) s = s.slice(0, -1);
+  }
+  const dbl = s.split("::");
+  if (dbl.length > 2) return null;
+  const part = x => x === "" ? [] : x.split(":");
+  const a = part(dbl[0]), b = dbl.length > 1 ? part(dbl[1]) : [];
+  const groups = [...a, ...b];
+  for (const g of groups) if (!/^[0-9a-f]{1,4}$/i.test(g)) return null;
+  const nAll = groups.length + tail.length;
+  if (dbl.length === 1 ? nAll !== 8 : nAll > 7) return null;
+  return [...a.map(g => parseInt(g, 16)), ...new Array(8 - nAll).fill(0), ...b.map(g => parseInt(g, 16)), ...tail];
+}
+function parseIP(s) {
+  s = s.trim();
+  let m;
+  if ((m = /^\[([^\]]+)\](?::\d+)?$/.exec(s))) s = m[1];                  // [v6]:port
+  else if ((m = /^([\d.]+):\d{1,5}$/.exec(s))) s = m[1];                  // v4:port
+  const n = ip4num(s);
+  if (n >= 0) return {v: 4, n};
+  const w = ip6words(s);
+  if (!w) return null;
+  if (w[0] === 0 && w[1] === 0 && w[2] === 0 && w[3] === 0 && w[4] === 0 && w[5] === 65535) return {v: 4, n: w[6] * 65536 + w[7]};
+  return {v: 6, h: [w[0] * 65536 + w[1], w[2] * 65536 + w[3], w[4] * 65536 + w[5], w[6] * 65536 + w[7]]};
+}
+// "10.0.0.0/8", "2001:db8::/32", or a bare address (a /32 or /128 network)
+function parseCIDR(s) {
+  const sl = s.lastIndexOf("/");
+  const ip = parseIP(sl < 0 ? s : s.slice(0, sl));
+  if (!ip) return null;
+  const max = ip.v === 4 ? 32 : 128;
+  let len = max;
+  if (sl >= 0) {
+    if (!/^\d{1,3}$/.test(s.slice(sl + 1))) return null;
+    len = +s.slice(sl + 1);
+    if (ip.v === 4 && s.includes(":")) len -= 96;                       // ::ffff:10.0.0.0/104
+    if (len < 0 || len > max) return null;
+  }
+  return {v: ip.v, len, ip};
+}
+function inNet(net, ip) {
+  if (!ip || ip.v !== net.v) return false;
+  if (ip.v === 4) { const k = 2 ** (32 - net.len); return Math.floor(ip.n / k) === Math.floor(net.ip.n / k); }
+  for (let i = 0, left = net.len; i < 4 && left > 0; i++, left -= 32) {
+    const k = 2 ** (32 - Math.min(32, left));
+    if (Math.floor(ip.h[i] / k) !== Math.floor(net.ip.h[i] / k)) return false;
+  }
+  return true;
+}
+function cmpIP(a, b) {
+  if (a.v !== b.v) return a.v - b.v;
+  if (a.v === 4) return a.n - b.n;
+  for (let i = 0; i < 4; i++) if (a.h[i] !== b.h[i]) return a.h[i] - b.h[i];
+  return 0;
+}
+const ipKey = ip => !ip ? NaN : ip.v === 4 ? ip.n : 2 ** 32 + ip.h[0] * 2 ** 32 + ip.h[1];    // sort key (IPv6 order kept to ~53 bits)
+const NETS = {};
+for (const [k, l] of Object.entries({
+  private: "10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fc00::/7", loopback: "127.0.0.0/8 ::1", linklocal: "169.254.0.0/16 fe80::/10",
+  multicast: "224.0.0.0/4 ff00::/8", reserved: "0.0.0.0/8 100.64.0.0/10 192.0.2.0/24 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 240.0.0.0/4 ::/128 2001:db8::/32"
+})) NETS[k] = l.split(" ").map(parseCIDR);
+const isPublicIP = ip => !!ip && !Object.values(NETS).some(ns => ns.some(n => inNet(n, ip)));
+// one IP-filter token -> predicate on a parsed IP, or null if the token is not IP syntax
+function ipTokenPred(tok) {
+  const k = tok.toLowerCase();
+  if (k === "public") return isPublicIP;
+  if (NETS[k]) return ip => NETS[k].some(n => inNet(n, ip));
+  const r = /^(.+?)\.\.(.+)$/.exec(tok);
+  if (r && !tok.includes("/")) { const a = parseIP(r[1]), b = parseIP(r[2]); if (a && b) return ip => !!ip && cmpIP(ip, a) >= 0 && cmpIP(ip, b) <= 0; }
+  const net = parseCIDR(tok.replace(/^=/, ""));
+  return net ? ip => inNet(net, ip) : null;
+}
+// candidate addresses inside free text (each one is validated with parseIP)
+const IP_CAND = "(?<![\\w.:])(?:\\d{1,3}(?:\\.\\d{1,3}){3}|[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}(?:\\d{1,3}(?:\\.\\d{1,3}){3})?)(?![\\w:]|\\.\\d)";
+const TYPE_LABEL = {int: "123", float: "1.5", time: "ts", epoch: "ep", ip: "ip", str: "abc"};
+const TYPE_NAME = {int: "integer", float: "decimal number", time: "timestamp", epoch: "epoch timestamp (s / ms / µs / ns since 1970)", ip: "IP address (v4 / v6)", str: "text"};
+const TYPE_CYCLE = ["int", "float", "time", "epoch", "ip", "str"];
 
 function tzOff(z) {
   if (!z || /^(Z|UTC)$/i.test(z)) return 0;
@@ -806,6 +907,7 @@ function typedValue(type, v, c) {
     case "int": case "float": return parseNum(v, T.delim !== ",");
     case "epoch": return parseEpoch(v);
     case "time": { const r = parseTsFull(v, T.dmy[c]); return r ? r.ms : NaN; }
+    case "ip": return ipKey(parseIP(v));
     default: return NaN;
   }
 }
@@ -818,6 +920,7 @@ function inferType(name, samples, decComma) {
     if (/time|date|epoch|stamp|created|modified|accessed|^ts$|_ts$|_at$|^when/i.test(name) && frac(v => parseEpoch(v) === parseEpoch(v)) >= 0.95) return {type: "epoch"};
     return {type: "int"};
   }
+  if (frac(v => parseIP(v) !== null) >= 0.95) return {type: "ip"};
   let dmy = true, sawA = false, sawB = false;
   for (const v of vs) { const m = RE_DMY.exec(v); if (m) { if (+m[1] > 12) sawA = true; if (+m[2] > 12) sawB = true; } }
   if (!sawA && sawB) dmy = false;
@@ -852,10 +955,14 @@ async function typedColumn(c, g) {
 //   a..b            range (numbers or timestamps, inclusive)
 //   /regex/i        regular expression
 function makePred(f, c) {
-  const t = T, type = t.types[c], numeric = type !== "str";
+  const t = T, type = t.types[c], numeric = type !== "str" && type !== "ip";
   f = f.trim();
   let neg = false;
   if (f[0] === "!") { neg = true; f = f.slice(1); }
+  if (type === "ip" && f) {                    // IP column: subnets / addresses / ranges / named sets, separated by spaces or commas (any matches)
+    const preds = f.split(/[\s,]+/).filter(Boolean).map(ipTokenPred);
+    if (preds.every(Boolean)) { const p = v => { const ip = parseIP(v); return !!ip && preds.some(q => q(ip)); }; return neg ? v => !p(v) : p; }
+  }
   const bound = x => {
     x = x.trim();
     if (type === "int" || type === "float") { const v = parseNum(x, t.delim !== ","); return v === v ? {v, span: 0} : null; }
@@ -971,8 +1078,8 @@ function lexQuery(q) {
       else if (q[j] === ")") { if (own) own--; else if (depth > 0) break; }
       j++;
     }
-    const w = q.slice(i, j);
-    out.push(w === "AND" || w === "OR" || w === "NOT" ? {k: w} : {k: "T", re: reEsc(w), v: w});
+    const w = q.slice(i, j), net = /^[\d.]+\/\d+$|:/.test(w) || RE_IP4.test(w) ? parseCIDR(w) : null;   // an IP or a subnet
+    out.push(w === "AND" || w === "OR" || w === "NOT" ? {k: w} : net ? {k: "T", re: IP_CAND, v: w, net} : {k: "T", re: reEsc(w), v: w});
     i = j;
   }
   return out;
@@ -1001,7 +1108,7 @@ function parseQuery(q) {
     const k = peek();
     if (k === "NOT") { i++; return {t: "not", a: unary()}; }
     if (k === "(") { i++; const e = orE(); if (peek() === ")") i++; return e; }    // a missing ")" at the end is forgiven
-    if (k === "T") { const tok = tk[i++]; new RegExp(tok.re); return {t: "term", re: tok.re}; }
+    if (k === "T") { const tok = tk[i++]; new RegExp(tok.re); return tok.net ? {t: "term", re: tok.re, net: tok.net, key: "ip:" + tok.v} : {t: "term", re: tok.re}; }
     throw new Error("unexpected " + (k || "end of query"));
   };
   if (!tk.length) return null;
@@ -1012,15 +1119,20 @@ function parseQuery(q) {
 // regex sources of the terms that are searched for (not negated), for highlighting
 function posTerms(node, neg, out) {
   if (!node) return out;
-  if (node.t === "term") { if (!neg && node.re) out.push(node.re); }
+  if (node.t === "term") { if (!neg && node.re) out.push(node); }
   else if (node.t === "not") posTerms(node.a, !neg, out);
   else node.a.forEach(x => posTerms(x, neg, out));
   return out;
 }
-function queryRe(q) {
-  if (reOn) return q;
-  const terms = posTerms(parseQuery(q), false, []);
-  return terms.length ? terms.sort((a, b) => b.length - a.length).map(x => "(?:" + x + ")").join("|") : null;
+const netTest = net => s => inNet(net, parseIP(s));
+// highlighting: [{re, test?}] - plain terms share one alternation, each IP / subnet term has its own validated matcher
+function hlMatchers(q) {
+  const fl = "g" + (caseOn ? "" : "i");
+  if (reOn) return [{re: new RegExp(q, fl)}];
+  const terms = posTerms(parseQuery(q), false, []), plain = terms.filter(x => !x.net).map(x => x.re), out = [];
+  if (plain.length) out.push({re: new RegExp(plain.sort((a, b) => b.length - a.length).map(x => "(?:" + x + ")").join("|"), fl)});
+  for (const x of terms) if (x.net) out.push({re: new RegExp(x.re, "gi"), test: netTest(x.net)});
+  return out;
 }
 async function searchMask(q, g) {
   const t = T;
@@ -1033,9 +1145,10 @@ async function searchMask(q, g) {
   let done = 0;
   const ev = async x => {
     if (x.t === "term") {
-      if (!cache.has(x.re)) { const m = await scanMask(x.re, g, done, nTerms); if (!m) return null; cache.set(x.re, m); }
+      const key = x.key || x.re;
+      if (!cache.has(key)) { const m = await scanMask(x.re, g, done, nTerms, x.net ? netTest(x.net) : null); if (!m) return null; cache.set(key, m); }
       done++;
-      return cache.get(x.re);
+      return cache.get(key);
     }
     if (x.t === "not") { const m = await ev(x.a); if (!m) return null; const r = new Uint8Array(n); for (let k = 0; k < n; k++) r[k] = m[k] ^ 1; return r; }
     let r = null;
@@ -1049,9 +1162,9 @@ async function searchMask(q, g) {
   return ev(ast);
 }
 // rows whose raw record matches the regex source re
-async function scanMask(src, g, done, nTerms) {
+async function scanMask(src, g, done, nTerms, test) {
   const t = T, n = nData(t), mask = new Uint8Array(n);
-  const re = new RegExp(src, "g" + (caseOn ? "" : "i"));
+  const re = new RegExp(src, "g" + (caseOn && !test ? "" : "i"));
   const CH = 20000, {st, en, ck, base, texts} = t;
   let last = performance.now();
   for (let a = 0, b; a < n; a = b) {
@@ -1062,6 +1175,7 @@ async function scanMask(src, g, done, nTerms) {
     re.lastIndex = 0;
     let p = a, m;
     while ((m = re.exec(s))) {
+      if (test && !test(m[0])) continue;                   // e.g. an address outside the searched subnet
       const pos = o + m.index;
       while (p < b - 1 && en[p + base] < pos) p++;
       mask[p] = 1;
@@ -1092,7 +1206,7 @@ function activeFilters(exclude) {
     if (c === exclude) continue;
     if (set) flt.push([c, (v) => set.has(v), false]);
     if (t.filters[c]) {
-      try { flt.push([c, makePred(t.filters[c], c), t.types[c] !== "str"]); if (ui) inp.classList.remove("bad"); } catch (e) { if (ui) inp.classList.add("bad"); }
+      try { flt.push([c, makePred(t.filters[c], c), t.types[c] !== "str" && t.types[c] !== "ip"]); if (ui) inp.classList.remove("bad"); } catch (e) { if (ui) inp.classList.add("bad"); }
     } else if (ui) inp.classList.remove("bad");
   }
   if (t.tr && t.tr.c !== exclude) { const {c, lo, hi} = t.tr; flt.push([c, (v, x) => x >= lo && x <= hi, true]); }
@@ -1172,22 +1286,28 @@ function geom() {
 let raf = 0;
 function schedule() { if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(); }); }
 
-let hlKey = "", hlRe = null;
+let hlKey = "", hlMs = [];
 function hlHtml(v) {
   const q = $("q").value, key = q + "|" + reOn + "|" + caseOn;
   if (key !== hlKey) {
-    hlKey = key; hlRe = null;
-    if (q) try { const src = queryRe(q); if (src) hlRe = new RegExp(src, "g" + (caseOn ? "" : "i")); } catch (e) {}
+    hlKey = key; hlMs = [];
+    if (q) try { hlMs = hlMatchers(q); } catch (e) {}
   }
-  if (!hlRe || !v) return esc(v);
-  hlRe.lastIndex = 0;
-  let out = "", p = 0, m;
-  while ((m = hlRe.exec(v))) {
-    if (!m[0]) { hlRe.lastIndex++; continue; }
-    out += esc(v.slice(p, m.index)) + '<mark class="hl">' + esc(m[0]) + "</mark>";
-    p = m.index + m[0].length;
+  if (!hlMs.length || !v) return esc(v);
+  const rs = [];
+  for (const {re, test} of hlMs) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(v))) {
+      if (!m[0]) { re.lastIndex++; continue; }
+      if (!test || test(m[0])) rs.push([m.index, m.index + m[0].length]);
+    }
   }
-  return p ? out + esc(v.slice(p)) : esc(v);
+  if (!rs.length) return esc(v);
+  rs.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  let out = "", p = 0;
+  for (const [a, b] of rs) { if (a < p) continue; out += esc(v.slice(p, a)) + '<mark class="hl">' + esc(v.slice(a, b)) + "</mark>"; p = b; }
+  return out + esc(v.slice(p));
 }
 
 function render() {
@@ -1473,6 +1593,7 @@ $("scroller").addEventListener("keydown", e => {
 window.addEventListener("keydown", e => {
   if (e.target.matches("input, select, textarea")) { if (e.key === "Escape") { e.target.blur(); } return; }
   if ((e.key === "/" || (e.key === "f" && (e.ctrlKey || e.metaKey))) && T) { e.preventDefault(); $("q").focus(); $("q").select(); }
+  else if ((e.key === "h" || e.key === "H" || e.key === "?") && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleHelp(); }
 });
 
 function toggleDetail() { const d = $("detail"); d.hidden = !d.hidden; $("bdet").classList.toggle("on", !d.hidden); showDetail(); render(); }
@@ -1502,7 +1623,7 @@ $("dclose").addEventListener("click", toggleDetail);
 async function showStats(c) {
   const t = T, vals = await colValues(c, null);
   if (!vals || T !== t) return;
-  const type = t.types[c], typed = type !== "str" ? await typedColumn(c, null) : null;
+  const type = t.types[c], typed = type !== "str" && type !== "ip" ? await typedColumn(c, null) : null;
   setProg(null);
   setProg(0.5, "Applying the other filters…");
   const ctx = await buildMask(null, c);
@@ -1550,8 +1671,8 @@ async function showStats(c) {
     const top = m.slice(0, 300), max = top.length ? Math.max(...top.map(r => r.n)) : 1;
     let h = "";
     top.forEach((r, i) => {
-      h += '<label class="sr"><span class="val"><input type="checkbox" data-i="' + i + '"' + (pick.has(r.v) ? " checked" : "") + ">" +
-        (r.v === "" ? "<i>(empty)</i>" : esc(r.v.length > 120 ? r.v.slice(0, 120) + "…" : r.v)) + '</span><span class="n">' + fmtN(r.n) + " · " + (ctxN ? 100 * r.n / ctxN : 0).toFixed(1) +
+      h += '<label class="sr"><span class="val"' + (r.v.length > 60 ? ' title="' + esc(r.v.slice(0, 2000)) + '"' : "") + '><input type="checkbox" data-i="' + i + '"' + (pick.has(r.v) ? " checked" : "") + ">" +
+        (r.v === "" ? "<i>(empty)</i>" : esc(r.v.length > 400 ? r.v.slice(0, 400) + "…" : r.v)) + '</span><span class="n">' + fmtN(r.n) + " · " + (ctxN ? 100 * r.n / ctxN : 0).toFixed(1) +
         '%</span><span class="bar2" style="width:' + Math.max(1, 100 * r.n / max) + '%"></span></label>';
     });
     $("vlist").innerHTML = h;
@@ -1566,6 +1687,7 @@ async function showStats(c) {
   $("vnone").onclick = () => { pick.clear(); list(); };
   $("vapply").onclick = () => { t.sets[c] = pick.size ? new Set(pick) : null; $("dlg").close(); refresh(); };
   list();
+  $("dlg").classList.add("big");
   $("dlg").showModal();
 }
 function showColumns() {
@@ -1584,7 +1706,7 @@ function showColumns() {
       const name = t.cols[c];
       if (q && !name.toLowerCase().includes(q)) return;
       const note = (t.filters[c] || t.sets[c]) ? " · filtered" : "";
-      h += '<label class="sr"><span class="val"><input type="checkbox" data-c="' + c + '"' + (t.hidden[c] ? "" : " checked") + "> " + esc(name) +
+      h += '<label class="sr"><span class="val" title="' + esc(name) + '"><input type="checkbox" data-c="' + c + '"' + (t.hidden[c] ? "" : " checked") + "> " + esc(name) +
         '</span><span class="n">' + TYPE_LABEL[t.types[c]] + note + "</span></label>";
     });
     $("clist").innerHTML = h || '<p class="hint">No column matches.</p>';
@@ -1599,6 +1721,7 @@ function showColumns() {
   $("cinv").onclick = () => forMatching(h => !h);
   $("creset").onclick = () => { resetColOrder(); list(); };
   list();
+  $("dlg").classList.add("big");
   $("dlg").showModal();
 }
 $("bcols").addEventListener("click", showColumns);
@@ -1628,7 +1751,50 @@ function showCell(cell) {
   $("dx").focus();                              // so Space / Enter close it again
   $("dbody").scrollTop = 0;
 }
-$("dlg").addEventListener("close", () => $("dlg").classList.remove("wide"));
+$("dlg").addEventListener("close", () => $("dlg").classList.remove("wide", "help", "big"));
+// ---- H / ?: shortcuts and syntax
+const HELP_HTML = (() => {
+  const k = s => s.split(" ").map(x => "<kbd>" + x + "</kbd>").join(" ");
+  const tb = rows => "<table>" + rows.map(([a, b]) => "<tr><td>" + a + "</td><td>" + b + "</td></tr>").join("") + "</table>";
+  const c = s => "<code>" + esc(s) + "</code>";
+  return '<div class="cols"><div>' +
+    "<h4>Keyboard (grid)</h4>" + tb([
+      [k("← → ↑ ↓"), "Move the selection"], [k("Shift") + " + arrows", "Extend the selection"],
+      [k("PgUp PgDn"), "Page up / down"], [k("Home End"), "First / last column"], [k("Ctrl") + " + " + k("Home End"), "First / last row"],
+      [k("Ctrl") + " + " + k("← →"), "Move the column left / right"], [k("Ctrl") + " + " + k("A"), "Select everything"],
+      [k("Ctrl") + " + " + k("C"), "Copy (tab-separated)"], [k("Ctrl") + " + " + k("Shift") + " + " + k("C"), "Copy with the column names"],
+      [k("Space"), "Show the full cell content"], [k("D") + " / " + k("Enter"), "Row details panel"], [k("R"), "Fit all columns to the window"],
+      [k("/") + " / " + k("Ctrl") + " + " + k("F"), "Search"], [k("Esc"), "Collapse the selection / leave a field"], [k("H") + " / " + k("?"), "This help"],
+    ]) +
+    "<h4>Mouse</h4>" + tb([
+      ["Double-click a cell", "Full content"], ["Right-click a cell", "Copy, filter by value, build the search"],
+      ["Click a header", "Sort (asc → desc → off)"], ["Drag a header", "Move the column"], ["Right-click a header", "Sort, hide, move, statistics, fit"],
+      ["Drag a header edge", "Resize (double-click: fit to content)"], ["Type badge (123, ts, ip…)", "Change the detected type"], ["Row numbers", "Select whole rows"],
+    ]) + "</div><div>" +
+    "<h4>Search box (all columns)</h4>" + tb([
+      [c("error timeout"), "Both words (AND)"], [c("error OR warn"), "Either"], [c("NOT debug") + " " + c("-debug"), "Exclude"],
+      [c('"connection reset"'), "Exact phrase"], [c("/err(or)?\\d+/"), "Regex term"], [c("(a OR b) NOT c"), "Grouping"],
+      [c("10.0.0.0/8") + " " + c("2001:db8::/32"), "Any IP in the subnet"], [c("10.0.0.5"), "That exact IP (not 10.0.0.50)"],
+      ["<kbd>.*</kbd> button", "Whole box is one regex"], ["<kbd>Aa</kbd> button", "Match case"],
+    ]) +
+    "<h4>Column filters</h4>" + tb([
+      [c("text") + " " + c("!text"), "Contains / does not contain"], [c("=x") + " " + c("!=x"), "Equals / differs"], [c("=") + " " + c("!"), "Empty / non-empty"],
+      [c(">5") + " " + c("<=2026-09-28"), "Numbers, timestamps"], [c("10..20"), "Range (inclusive)"], [c("/regex/"), "Regular expression"],
+      [c("10.0.0.0/8, 192.168.1.10"), "IP columns: subnets / IPs (any)"], [c("10.0.0.1..10.0.0.50"), "IP range"],
+      [c("private") + " " + c("public") + " " + c("loopback") + " " + c("multicast"), "IP classes (prefix ! to negate)"], ["☰ button", "Pick values from a list"],
+    ]) + "</div></div>";
+})();
+function toggleHelp() {
+  const d = $("dlg");
+  if (d.open) { const was = d.classList.contains("help"); d.close(); if (was) return; }
+  $("dh").textContent = "Shortcuts & search syntax";
+  $("dbody").onclick = null;
+  $("dbody").innerHTML = '<div class="help">' + HELP_HTML + "</div>";
+  d.classList.add("help");
+  d.showModal();
+  $("dbody").scrollTop = 0;
+}
+$("bhelp").addEventListener("click", toggleHelp);
 $("dlg").addEventListener("keydown", e => {   // Space closes the cell view again (unless a button/field has the key)
   if (e.key === " " && $("dlg").classList.contains("wide") && !e.target.matches("button, input, select, textarea")) { e.preventDefault(); $("dlg").close(); }
 });
@@ -1891,7 +2057,7 @@ if (lsGet("csvviewer.wrap") === "1") setWrap(true);
 // ---------------------------------------------------------------- toolbar, export, theme, input
 const Q_TIP = "Search all rows (/ or Ctrl+F)\n\n" +
   "error timeout        both words (AND)\nerror OR warn        either\nNOT debug  /  -debug  exclude\n" +
-  "\"connection reset\"   exact phrase\n/err(or)?\\d+/        regular expression term\n(a OR b) NOT c       grouping\n\n" +
+  "\"connection reset\"   exact phrase\n10.0.0.0/8  2001:db8::/32   IPs in a subnet (a bare IP matches exactly)\n/err(or)?\\d+/        regular expression term\n(a OR b) NOT c       grouping\n\n" +
   "Operators are UPPERCASE; quote a word to search it literally (\"OR\").\nThe .* button treats the whole box as one regular expression.";
 $("q").title = Q_TIP;
 let qtimer = 0;
