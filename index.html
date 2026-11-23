@@ -78,7 +78,8 @@ label.chk { display: inline-flex; align-items: center; gap: 5px; color: var(--te
   font-size: 11px; text-align: right; padding: 0 8px; line-height: 25px; border-right: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
 .c { position: absolute; top: 0; height: 100%; padding: 0 8px; line-height: 25px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   border-right: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
-.c.sel { background: var(--sel); box-shadow: inset 0 0 0 1.5px var(--accent); }
+/* outline + z-index: the accent frame sits on top of the neighbouring grid lines instead of under them */
+.c.sel { background: var(--sel); outline: 1.5px solid var(--accent); outline-offset: 0; z-index: 1; border-right-color: transparent; }
 .r.rsel .g { color: var(--accent); font-weight: 600; }
 #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; }
 #empty .box { max-width: 460px; width: 100%; text-align: center; padding: 44px 24px; border: 2px dashed var(--axis); border-radius: 14px; background: var(--surface); cursor: pointer; }
@@ -178,7 +179,7 @@ button.on { background: var(--accent-bg); border-color: var(--accent); color: va
 .hc .nm { font-weight: 600; }
 .c, .g { font-family: var(--mono); font-size: 12.5px; font-weight: var(--cell-w); }
 .g { font-size: 11px; }
-.c.sel { box-shadow: var(--glow), inset 0 0 0 1.5px var(--accent); background: var(--sel); border-radius: 3px; }
+.c.sel { box-shadow: var(--glow); background: var(--sel); border-radius: 3px; }
 .kv .v, .sum b { font-family: var(--mono); }
 #detail, dialog { box-shadow: var(--shadow); }
 dialog { border-radius: 14px; }
@@ -216,7 +217,7 @@ body.colmv, body.colmv * { cursor: grabbing !important; }
     <button id="btr" disabled title="Select a time range on a timestamp column">Time range</button>
     <button id="bwrap" disabled title="Wrap long values over several lines instead of cutting them off">Wrap</button>
     <button id="bcols" disabled title="Choose which columns to show / export">Columns</button>
-    <button id="bdet" disabled>Details</button>
+    <button id="bdet" title="Row details (D or Enter)" disabled>Details</button>
     <button id="bexp" disabled>Export view</button>
     <button id="bthm" title="Toggle theme">Theme</button>
     <button id="bopen">Open…</button>
@@ -587,6 +588,65 @@ const endDrag = () => {
 };
 $("hin").addEventListener("pointerup", endDrag);
 $("hin").addEventListener("pointercancel", e => { if (colDrag) colDrag.ins = null; endDrag(); });
+// ---- R: fit every visible column to the window (no horizontal scroll bar).
+// Numbers, timestamps and other short values keep their full width when at all possible; long text columns share what is left.
+let fitCtx = null;
+function fitColumns() {
+  const t = T;
+  if (!t || !t.nView) return;
+  const vis = t.ord.filter(c => !t.hidden[c]);
+  const W = $("scroller").clientWidth - GUTTER - 2;
+  if (W < 50 || !vis.length) return;
+  fitCtx = fitCtx || document.createElement("canvas").getContext("2d");
+  const cellEl = $("layer").querySelector(".c"), hk = $("hin").children;
+  const fontOf = el => { const cs = getComputedStyle(el); return cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily; };   // cs.font can be "" (font-variant)
+  const cellFont = cellEl ? fontOf(cellEl) : "12.5px monospace";
+  // sample rows of the current view: the first 200 + evenly spaced ones
+  const nS = Math.min(t.nView, 600), rows = [];
+  for (let i = 0; i < Math.min(200, nS); i++) rows.push(i);
+  for (let i = 200; i < nS; i++) rows.push(Math.floor((i - 200) * t.nView / (nS - 200)));
+  const cont = new Map(vis.map(c => [c, [0]]));
+  fitCtx.font = cellFont;
+  for (const vi of rows) {
+    const cells = rowCells(rowAt(vi));
+    for (const c of vis) { const v = cells[c] || ""; if (v) cont.get(c).push(v.length > 300 ? 2000 : fitCtx.measureText(v).width); }
+  }
+  const PAD = 19, LONG = 260;                    // PAD: cell padding + border; LONG: a column wider than this is "long text"
+  const info = vis.map(c => {
+    const ws = cont.get(c).sort((a, b) => a - b), max = ws[ws.length - 1], p90 = ws[Math.floor(ws.length * 0.9)];
+    const h = hk[c * 2], nm = h.querySelector(".nm"), ty = h.querySelector(".ty");
+    fitCtx.font = fontOf(nm);
+    const head = Math.ceil(fitCtx.measureText(t.cols[c]).width + 16 + ty.offsetWidth + 18);
+    fitCtx.font = cellFont;
+    const typed = t.types[c] !== "str", full = Math.ceil(max + PAD);
+    const short = typed || full <= LONG;
+    // core: never truncate short values; nat: also the header, and long text up to its 90th percentile
+    const core = short ? Math.max(48, full) : 80;
+    const nat = Math.max(core, Math.min(Math.max(head, short ? full : Math.ceil(p90 + PAD)), 900));
+    return {c, short, core, nat};
+  });
+  const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
+  const totNat = sum(info, x => x.nat);
+  if (totNat <= W) {                              // everything fits: share the spare room, mostly with the text columns
+    const grow = info.filter(x => !x.short).length ? info.filter(x => !x.short) : info, gN = sum(grow, x => x.nat);
+    let spare = W - totNat;
+    for (const x of info) x.w = x.nat;
+    for (const x of grow) x.w += Math.floor(spare * x.nat / gN);
+  } else if (sum(info, x => x.core) <= W) {       // short columns get their full value width, then headers / text share the rest
+    for (const x of info) x.w = x.core;
+    let spare = W - sum(info, x => x.core);
+    const hdr = info.filter(x => x.short && x.nat > x.core), hN = sum(hdr, x => x.nat - x.core);
+    if (hN && hN <= spare) { for (const x of hdr) x.w = x.nat; spare -= hN; }   // whole headers of the short columns first
+    const want = info.filter(x => x.nat > x.w), wN = sum(want, x => x.nat - x.w);
+    for (const x of want) x.w += Math.floor(spare * (x.nat - x.w) / wN);
+  } else {                                        // too many columns: everything shrinks proportionally (a scroll bar may remain)
+    const k = W / sum(info, x => x.core);
+    for (const x of info) x.w = Math.max(36, Math.floor(x.core * k));
+  }
+  for (const x of info) t.widths[x.c] = x.w;
+  layoutHeader(); updateSpacer(); render();
+  toast("Columns fitted to the window");
+}
 $("hin").addEventListener("dblclick", e => {
   const rz = e.target.closest(".rz");
   if (!rz) return;
@@ -628,7 +688,7 @@ function showColMenu(c, x, y) {
     ["sa", "Sort ascending", s && s.c === c && s.dir > 0], ["sd", "Sort descending", s && s.c === c && s.dir < 0], ["sx", "Clear sort", !s], null,
     ["hide", "Hide column", vis.length <= 1], ["show", "Show all hidden columns" + (nHidden ? " (" + nHidden + ")" : ""), !nHidden], ["cols", "Choose columns…"], null,
     ["ml", "Move left", vp <= 0, "Ctrl+←"], ["mr", "Move right", vp >= vis.length - 1, "Ctrl+→"], ["mh", "Move to start", vp <= 0], ["me", "Move to end", vp >= vis.length - 1],
-    ["mreset", "Reset column order", !orderChanged()], null,
+    ["mreset", "Reset column order", !orderChanged()], ["fit", "Fit all columns to the window", false, "R"], null,
     ["stats", "Statistics / pick values…"], ["copy", "Copy column name"],
   ];
   popMenu(t.cols[c], items, x, y, a => {
@@ -643,6 +703,7 @@ function showColMenu(c, x, y) {
       case "mh": moveCol(c, 0); break;
       case "me": moveCol(c, t.nc); break;
       case "mreset": resetColOrder(); break;
+      case "fit": fitColumns(); break;
       case "stats": showStats(c); break;
       case "copy": copyText(t.cols[c]); break;
     }
@@ -1291,7 +1352,7 @@ function showCellMenu(cell, x, y) {
   const t = T, c = cell.c, v = cellValue(cell), b = rangeBox(), multi = b.r1 > b.r0 || b.p1 > b.p0, s = t.sort;
   const short = v.length > 24 ? v.slice(0, 24) + "…" : v, q = $("q").value.trim(), noV = v === "";
   const items = [
-    ["view", "Show full content", false, "Space"], ["detail", ($("detail").hidden ? "Show" : "Hide") + " row details", false, "Enter"], null,
+    ["view", "Show full content", false, "Space"], ["detail", ($("detail").hidden ? "Show" : "Hide") + " row details", false, "D"], null,
     ["copy", "Copy cell", false, multi ? "" : "Ctrl+C"], ["copysel", "Copy selection", !multi, multi ? "Ctrl+C" : ""],
     ["copyh", "Copy selection with headers", false, "Ctrl+Shift+C"], ["copyrow", "Copy row"], null,
     "Filter this column",
@@ -1395,6 +1456,8 @@ $("scroller").addEventListener("keydown", e => {
     case "Home": if (e.ctrlKey) vi = 0; else c = firstVisCol(); break;
     case "End": if (e.ctrlKey) vi = t.nView - 1; else c = lastVisCol(); break;
     case "Enter": toggleDetail(); return;
+    case "r": case "R": if (!e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); fitColumns(); } return;
+    case "d": case "D": if (!e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleDetail(); } return;
     case " ": if (t.sel) { e.preventDefault(); showCell(); } return;
     case "c": case "C": if (e.ctrlKey || e.metaKey) { copyRange(e.shiftKey); e.preventDefault(); } return;
     case "a": case "A":
