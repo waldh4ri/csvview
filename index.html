@@ -104,6 +104,11 @@ dialog header { flex: none; padding: 12px 16px; border-bottom: 1px solid var(--b
 dialog h3 { margin: 0; font-size: 15px; }
 #dbody { padding: 8px 16px 16px; overflow: auto; flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
 dialog.wide { width: min(900px, 94vw); max-height: 86vh; }
+#dh { margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dcopy { display: none; }
+dialog.wide #dcopy { display: inline-block; }
+dialog.wide #dx { background: color-mix(in srgb, var(--bad) 16%, var(--surface)); border-color: color-mix(in srgb, var(--bad) 45%, var(--border)); color: var(--bad); }
+dialog.wide #dx:hover { background: color-mix(in srgb, var(--bad) 26%, var(--surface)); }
 #cellv { margin: 8px 0 0; font: 13px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; user-select: text; }
 #cellv:empty::before { content: "(empty)"; color: var(--muted); }
 .sr { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 4px 6px; border-radius: 6px; cursor: pointer; position: relative; }
@@ -191,6 +196,7 @@ body.colmv, body.colmv * { cursor: grabbing !important; }
 #cmenu button:hover, #cmenu button:focus-visible { background: var(--hover); outline: none; }
 #cmenu button:disabled { color: var(--muted); cursor: default; background: transparent; transform: none; }
 #cmenu button kbd { font: 11px var(--mono); color: var(--muted); }
+#cmenu .ms { padding: 6px 10px 2px; color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
 #cmenu hr { border: 0; border-top: 1px solid var(--grid); margin: 4px 2px; }
 </style>
 </head>
@@ -198,7 +204,7 @@ body.colmv, body.colmv * { cursor: grabbing !important; }
 <div id="app">
   <div class="bar">
     <span class="brand">CSV Viewer</span><span class="fname" id="fname"></span>
-    <input type="search" id="q" placeholder="Search all columns  ( / )" aria-label="Search all columns" disabled>
+    <input type="search" id="q" placeholder="Search  ·  a b, a OR b, NOT a, &quot;phrase&quot;, /re/  ( / )" aria-label="Search all columns" disabled>
     <button id="bre" title="Regular expression" disabled>.*</button>
     <button id="bcase" title="Match case" disabled>Aa</button>
     <label class="chk"><input type="checkbox" id="hdr" checked disabled> Header</label>
@@ -250,7 +256,7 @@ body.colmv, body.colmv * { cursor: grabbing !important; }
   </div>
   <div id="status"><span id="st1">Ready</span><span id="st2"></span></div>
 </div>
-<dialog id="dlg"><header><h3 id="dh"></h3><button id="dx">Close</button></header><div id="dbody"></div></dialog>
+<dialog id="dlg"><header><h3 id="dh"></h3><button id="dcopy">Copy</button><button id="dx">Close</button></header><div id="dbody"></div></dialog>
 <div id="cmenu" role="menu" hidden></div>
 <div id="toast"></div>
 <script>
@@ -625,15 +631,9 @@ function showColMenu(c, x, y) {
     ["mreset", "Reset column order", !orderChanged()], null,
     ["stats", "Statistics / pick values…"], ["copy", "Copy column name"],
   ];
-  const m = $("cmenu");
-  m.innerHTML = '<div class="mh">' + esc(t.cols[c]) + "</div>" + items.map(it => !it ? "<hr>" :
-    '<button role="menuitem" data-a="' + it[0] + '"' + (it[2] ? " disabled" : "") + ">" + esc(it[1]) + (it[3] ? "<kbd>" + it[3] + "</kbd>" : "") + "</button>").join("");
-  m.onclick = e => {
-    const b = e.target.closest("button");
-    if (!b || b.disabled) return;
-    hideColMenu();
-    switch (b.dataset.a) {
-      case "sa": case "sd": t.sort = {c, dir: b.dataset.a === "sa" ? 1 : -1}; layoutHeader(); refresh(); break;
+  popMenu(t.cols[c], items, x, y, a => {
+    switch (a) {
+      case "sa": case "sd": t.sort = {c, dir: a === "sa" ? 1 : -1}; layoutHeader(); refresh(); break;
       case "sx": t.sort = null; layoutHeader(); refresh(); break;
       case "hide": hideCol(c); break;
       case "show": t.hidden.fill(false); colsChanged(); break;
@@ -646,6 +646,18 @@ function showColMenu(c, x, y) {
       case "stats": showStats(c); break;
       case "copy": copyText(t.cols[c]); break;
     }
+  });
+}
+// items: [action, label, disabled, shortcut] or null (separator); act(action) runs after the menu closes
+function popMenu(title, items, x, y, act) {
+  const m = $("cmenu");
+  m.innerHTML = '<div class="mh">' + esc(title) + "</div>" + items.map(it => !it ? "<hr>" : typeof it === "string" ? '<div class="ms">' + esc(it) + "</div>" :
+    '<button role="menuitem" data-a="' + it[0] + '"' + (it[2] ? " disabled" : "") + ">" + esc(it[1]) + (it[3] ? "<kbd>" + it[3] + "</kbd>" : "") + "</button>").join("");
+  m.onclick = e => {
+    const b = e.target.closest("button");
+    if (!b || b.disabled) return;
+    hideColMenu();
+    act(b.dataset.a);
   };
   m.hidden = false;
   const W = m.offsetWidth, H = m.offsetHeight;
@@ -868,11 +880,117 @@ async function buildOrder(g) {
   return order;
 }
 
+// ---- search query language (plain mode; the ".*" button switches to a single raw regex)
+//   a b          both (implicit AND)        a AND b    a OR b    NOT a   -a
+//   "a b"        exact phrase               /re/       regular expression term
+//   ( … )        grouping                   precedence: NOT > AND > OR; operators are UPPERCASE ("and" is a word)
+const reEsc = x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function lexQuery(q) {
+  const out = [], n = q.length, sp = ch => ch === undefined || /\s/.test(ch);
+  let i = 0, depth = 0;
+  while (i < n) {
+    const ch = q[i];
+    if (/\s/.test(ch)) { i++; continue; }
+    if (ch === "(") { out.push({k: "("}); depth++; i++; continue; }
+    if (ch === ")") { out.push({k: ")"}); depth--; i++; continue; }
+    if (ch === "-" && /[^\s\-\d.]/.test(q[i + 1] || " ")) { out.push({k: "NOT"}); i++; continue; }
+    if (ch === '"') {                                        // "phrase" (\" inside), unterminated runs to the end
+      let j = i + 1, v = "";
+      while (j < n && q[j] !== '"') { if (q[j] === "\\" && j + 1 < n) j++; v += q[j++]; }
+      out.push({k: "T", re: reEsc(v), v}); i = j + 1; continue;
+    }
+    if (ch === "/") {                                        // /regex/ : the closing slash must end the token
+      let j = i + 1;
+      while (j < n && !(q[j] === "/" && (sp(q[j + 1]) || q[j + 1] === ")"))) j += q[j] === "\\" ? 2 : 1;
+      if (j < n && j > i + 1) { out.push({k: "T", re: q.slice(i + 1, j), v: q.slice(i, j + 1)}); i = j + 1; continue; }
+    }
+    let j = i, own = 0;                                      // bare word; keeps its own balanced parens: f(x)
+    while (j < n && !/\s/.test(q[j])) {
+      if (q[j] === "(") own++;
+      else if (q[j] === ")") { if (own) own--; else if (depth > 0) break; }
+      j++;
+    }
+    const w = q.slice(i, j);
+    out.push(w === "AND" || w === "OR" || w === "NOT" ? {k: w} : {k: "T", re: reEsc(w), v: w});
+    i = j;
+  }
+  return out;
+}
+// -> AST {t:"term", re} | {t:"and"|"or", a:[...]} | {t:"not", a:node} | null (empty query); throws on a syntax error
+function parseQuery(q) {
+  const tk = lexQuery(q);
+  while (tk.length && /^(AND|OR|NOT|\()$/.test(tk[tk.length - 1].k)) tk.pop();     // still typing: "a OR" searches a
+  let i = 0;
+  const peek = () => tk[i] && tk[i].k;
+  const orE = () => {
+    const a = [andE()];
+    while (peek() === "OR") { i++; a.push(andE()); }
+    return a.length > 1 ? {t: "or", a} : a[0];
+  };
+  const andE = () => {
+    const a = [unary()];
+    for (;;) {
+      if (peek() === "AND") { i++; a.push(unary()); }
+      else if (peek() && peek() !== "OR" && peek() !== ")") a.push(unary());
+      else break;
+    }
+    return a.length > 1 ? {t: "and", a} : a[0];
+  };
+  const unary = () => {
+    const k = peek();
+    if (k === "NOT") { i++; return {t: "not", a: unary()}; }
+    if (k === "(") { i++; const e = orE(); if (peek() === ")") i++; return e; }    // a missing ")" at the end is forgiven
+    if (k === "T") { const tok = tk[i++]; new RegExp(tok.re); return {t: "term", re: tok.re}; }
+    throw new Error("unexpected " + (k || "end of query"));
+  };
+  if (!tk.length) return null;
+  const e = orE();
+  if (i < tk.length) throw new Error("unexpected " + tk[i].k);
+  return e;
+}
+// regex sources of the terms that are searched for (not negated), for highlighting
+function posTerms(node, neg, out) {
+  if (!node) return out;
+  if (node.t === "term") { if (!neg && node.re) out.push(node.re); }
+  else if (node.t === "not") posTerms(node.a, !neg, out);
+  else node.a.forEach(x => posTerms(x, neg, out));
+  return out;
+}
+function queryRe(q) {
+  if (reOn) return q;
+  const terms = posTerms(parseQuery(q), false, []);
+  return terms.length ? terms.sort((a, b) => b.length - a.length).map(x => "(?:" + x + ")").join("|") : null;
+}
 async function searchMask(q, g) {
+  const t = T;
+  let ast;
+  try { ast = reOn ? {t: "term", re: q} : parseQuery(q); if (ast && ast.t === "term") new RegExp(ast.re); $("q").classList.remove("bad"); $("q").title = Q_TIP; }
+  catch (e) { $("q").classList.add("bad"); $("q").title = "Invalid search: " + e.message + "\n\n" + Q_TIP; return new Uint8Array(nData(t)); }
+  const n = nData(t), cache = new Map();
+  if (!ast) return new Uint8Array(n).fill(1);
+  const nTerms = (function count(x) { return x.t === "term" ? 1 : x.t === "not" ? count(x.a) : x.a.reduce((s, y) => s + count(y), 0); })(ast);
+  let done = 0;
+  const ev = async x => {
+    if (x.t === "term") {
+      if (!cache.has(x.re)) { const m = await scanMask(x.re, g, done, nTerms); if (!m) return null; cache.set(x.re, m); }
+      done++;
+      return cache.get(x.re);
+    }
+    if (x.t === "not") { const m = await ev(x.a); if (!m) return null; const r = new Uint8Array(n); for (let k = 0; k < n; k++) r[k] = m[k] ^ 1; return r; }
+    let r = null;
+    for (const y of x.a) {
+      const m = await ev(y); if (!m) return null;
+      if (!r) { r = m.slice(); continue; }
+      if (x.t === "and") for (let k = 0; k < n; k++) r[k] &= m[k]; else for (let k = 0; k < n; k++) r[k] |= m[k];
+    }
+    return r;
+  };
+  return ev(ast);
+}
+// rows whose raw record matches the regex source re
+async function scanMask(src, g, done, nTerms) {
   const t = T, n = nData(t), mask = new Uint8Array(n);
-  let re;
-  try { re = new RegExp(reOn ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g" + (caseOn ? "" : "i")); $("q").classList.remove("bad"); }
-  catch (e) { $("q").classList.add("bad"); return mask; }
+  const re = new RegExp(src, "g" + (caseOn ? "" : "i"));
   const CH = 20000, {st, en, ck, base, texts} = t;
   let last = performance.now();
   for (let a = 0, b; a < n; a = b) {
@@ -890,7 +1008,8 @@ async function searchMask(q, g) {
       if (re.lastIndex > s.length) break;
     }
     if (performance.now() - last > 30) {
-      setProg(a / n, "Searching… " + Math.round(100 * a / n) + "%");
+      const f = (done + a / n) / nTerms;
+      setProg(f, "Searching… " + Math.round(100 * f) + "%");
       await tick(); last = performance.now();
       if (T !== t || (g != null && g !== gen)) return null;
     }
@@ -997,7 +1116,7 @@ function hlHtml(v) {
   const q = $("q").value, key = q + "|" + reOn + "|" + caseOn;
   if (key !== hlKey) {
     hlKey = key; hlRe = null;
-    if (q) try { hlRe = new RegExp(reOn ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g" + (caseOn ? "" : "i")); } catch (e) {}
+    if (q) try { const src = queryRe(q); if (src) hlRe = new RegExp(src, "g" + (caseOn ? "" : "i")); } catch (e) {}
   }
   if (!hlRe || !v) return esc(v);
   hlRe.lastIndex = 0;
@@ -1135,6 +1254,84 @@ $("layer").addEventListener("pointerdown", e => {
   clearInterval(dragTimer);
   dragTimer = setInterval(() => { if (selDrag && selDrag.last) dragStep(selDrag.last); }, 60);
 });
+// right-click a cell: copy / view / filter by its value; a click inside the current selection keeps it
+$("layer").addEventListener("contextmenu", e => {
+  const t = T, cell = e.target.closest(".c"), row = e.target.closest(".r");
+  if (!t || !cell || !row) return;
+  e.preventDefault();
+  const vi = +row.dataset.vi, c = +cell.dataset.c, b = rangeBox();
+  if (!b || vi < b.r0 || vi > b.r1 || t.pos[c] < b.p0 || t.pos[c] > b.p1) select(vi, c, false);
+  showCellMenu({vi, c}, e.clientX, e.clientY);
+});
+function setFilter(c, f) {
+  const t = T;
+  t.filters[c] = f;
+  const inp = $("hin").querySelector('.fc[data-c="' + c + '"] input'); if (inp) inp.value = f;
+  refresh();
+}
+// ---- building search queries from the menu
+function qTerm(v) {                                   // a value as one search term: bare word or "quoted phrase"
+  return /[\s"()]/.test(v) || /^[-\/]/.test(v) || /^(AND|OR|NOT)$/.test(v) ? '"' + v.replace(/["\\]/g, "\\$&") + '"' : v;
+}
+function setSearch(q) {
+  if (reOn && q) { reOn = false; $("bre").classList.remove("on"); }     // built queries use the AND / OR / NOT syntax
+  $("q").value = q;
+  clearTimeout(qtimer); refresh();
+}
+function addSearch(op, v) {
+  let q = $("q").value.trim();
+  if (reOn) { setSearch(qTerm(v)); return; }                          // a raw regex cannot be combined: start over
+  const tk = lexQuery(q);
+  let d = 0, topOr = false;
+  for (const x of tk) { if (x.k === "(") d++; else if (x.k === ")") d--; else if (x.k === "OR" && d <= 0) topOr = true; }
+  if (op === "OR" ? tk.length > 1 && !topOr : topOr) q = "(" + q + ")";   // (a b) OR x · a OR b OR x · (a OR b) NOT x
+  setSearch(q ? q + " " + op + " " + qTerm(v) : (op === "NOT" ? "NOT " : "") + qTerm(v));
+}
+function showCellMenu(cell, x, y) {
+  const t = T, c = cell.c, v = cellValue(cell), b = rangeBox(), multi = b.r1 > b.r0 || b.p1 > b.p0, s = t.sort;
+  const short = v.length > 24 ? v.slice(0, 24) + "…" : v, q = $("q").value.trim(), noV = v === "";
+  const items = [
+    ["view", "Show full content", false, "Space"], ["detail", ($("detail").hidden ? "Show" : "Hide") + " row details", false, "Enter"], null,
+    ["copy", "Copy cell", false, multi ? "" : "Ctrl+C"], ["copysel", "Copy selection", !multi, multi ? "Ctrl+C" : ""],
+    ["copyh", "Copy selection with headers", false, "Ctrl+Shift+C"], ["copyrow", "Copy row"], null,
+    "Filter this column",
+    ["feq", v === "" ? "Keep empty values only" : "Keep only “" + short + "”"], ["fne", v === "" ? "Exclude empty values" : "Exclude “" + short + "”"],
+    ["fx", "Clear filter on this column", !t.filters[c]],
+    "Search all columns",
+    ...(q ? [["qa", "AND “" + short + "”", noV], ["qo", "OR “" + short + "”", noV], ["qn", "NOT “" + short + "”", noV], ["qs", "Replace search with “" + short + "”", noV]]
+          : [["qs", "Search “" + short + "”", noV], ["qn", "Search without “" + short + "”", noV]]),
+    ...(multi ? [["qany", "Search any selected value (OR)"]] : []),
+    ["qx", "Clear search", !q], null,
+    ["sa", "Sort ascending", s && s.c === c && s.dir > 0], ["sd", "Sort descending", s && s.c === c && s.dir < 0], ["hide", "Hide column", t.hidden.filter(h => !h).length <= 1],
+  ];
+  popMenu(t.cols[c] + " · row " + fmtN(rowAt(cell.vi) + 1), items, x, y, a => {
+    switch (a) {
+      case "view": showCell(cell); break;
+      case "detail": toggleDetail(); break;
+      case "copy": copyText(v); break;
+      case "copysel": copyRange(false); break;
+      case "copyh": copyRange(true); break;
+      case "copyrow": { const cells = rowCells(rowAt(cell.vi)); copyText(t.ord.filter(k => !t.hidden[k]).map(k => cells[k] || "").join("\t")); break; }
+      case "feq": setFilter(c, "=" + v); break;
+      case "fne": setFilter(c, v === "" ? "!" : "!=" + v); break;
+      case "fx": setFilter(c, ""); break;
+      case "qs": setSearch(qTerm(v)); break;
+      case "qa": addSearch("AND", v); break;
+      case "qo": addSearch("OR", v); break;
+      case "qn": addSearch("NOT", v); break;
+      case "qany": {
+        const vals = new Set(), bb = rangeBox();
+        for (let r = bb.r0; r <= bb.r1 && vals.size <= 50; r++) { const cells = rowCells(rowAt(r)); for (const k of boxCols(bb)) if (cells[k]) vals.add(cells[k]); }
+        if (vals.size > 50) { toast("More than 50 distinct values selected"); break; }
+        if (vals.size) setSearch([...vals].map(qTerm).join(" OR "));
+        break;
+      }
+      case "qx": setSearch(""); break;
+      case "sa": case "sd": t.sort = {c, dir: a === "sa" ? 1 : -1}; layoutHeader(); refresh(); break;
+      case "hide": hideCol(c); break;
+    }
+  });
+}
 $("layer").addEventListener("pointermove", e => { if (selDrag) { selDrag.last = e; dragStep(e); } });
 const endSel = () => { if (!selDrag) return; selDrag = null; clearInterval(dragTimer); updateSelStatus(); showDetail(); };
 $("layer").addEventListener("pointerup", endSel);
@@ -1343,27 +1540,29 @@ function showColumns() {
 }
 $("bcols").addEventListener("click", showColumns);
 // full content of the selected cell (double-click or Space); JSON values can be shown pretty-printed
-function showCell() {
+function showCell(cell) {
   const t = T;
-  if (!t || !t.sel) return;
-  const r = rowAt(t.sel.vi), c = t.sel.c, v = cellValue(t.sel);
+  cell = cell || (t && t.sel);
+  if (!cell) return;
+  const r = rowAt(cell.vi), c = cell.c, v = cellValue(cell);
   let pretty = null;
   if (/^\s*[\[{]/.test(v)) try { pretty = JSON.stringify(JSON.parse(v), null, 2); } catch (e) {}
   let fmt = pretty != null;
   $("dh").textContent = t.cols[c] + " · row " + fmtN(r + 1);
   $("dbody").onclick = null;
-  $("dbody").innerHTML = '<div class="ctl"><button id="ccopy">Copy</button>' + (pretty != null ? '<button id="cfmt"></button>' : "") +
+  $("dbody").innerHTML = '<div class="ctl">' + (pretty != null ? '<button id="cfmt"></button>' : "") +
     '<span class="sp"></span><span class="hint" id="cinfo" style="margin:0"></span></div>' + utcLine(c, v) + '<pre id="cellv"></pre>';
   const show = () => {
     $("cellv").textContent = fmt ? pretty : v;
     if (pretty != null) $("cfmt").textContent = fmt ? "Show raw" : "Format JSON";
   };
   $("cinfo").textContent = fmtN(v.length) + " chars" + (v.includes("\n") ? " · " + fmtN(v.split("\n").length) + " lines" : "");
-  $("ccopy").onclick = () => copyText(v);
+  $("dcopy").onclick = () => copyText(v);
   if (pretty != null) $("cfmt").onclick = () => { fmt = !fmt; show(); };
   show();
   $("dlg").classList.add("wide");
   $("dlg").showModal();
+  $("dx").focus();                              // so Space / Enter close it again
   $("dbody").scrollTop = 0;
 }
 $("dlg").addEventListener("close", () => $("dlg").classList.remove("wide"));
@@ -1627,6 +1826,11 @@ $("bwrap").addEventListener("click", () => setWrap(!wrapOn));
 if (lsGet("csvviewer.wrap") === "1") setWrap(true);
 
 // ---------------------------------------------------------------- toolbar, export, theme, input
+const Q_TIP = "Search all rows (/ or Ctrl+F)\n\n" +
+  "error timeout        both words (AND)\nerror OR warn        either\nNOT debug  /  -debug  exclude\n" +
+  "\"connection reset\"   exact phrase\n/err(or)?\\d+/        regular expression term\n(a OR b) NOT c       grouping\n\n" +
+  "Operators are UPPERCASE; quote a word to search it literally (\"OR\").\nThe .* button treats the whole box as one regular expression.";
+$("q").title = Q_TIP;
 let qtimer = 0;
 $("q").addEventListener("input", () => { clearTimeout(qtimer); qtimer = setTimeout(() => T && refresh(), 250); });
 $("bre").addEventListener("click", () => { reOn = !reOn; $("bre").classList.toggle("on", reOn); if (T && $("q").value) refresh(); });
