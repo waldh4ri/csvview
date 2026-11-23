@@ -56,14 +56,11 @@ label.chk { display: inline-flex; align-items: center; gap: 5px; color: var(--te
 #hg { position: absolute; left: 0; top: 0; width: 60px; height: 100%; z-index: 3; background: var(--surface-2); border-right: 1px solid var(--grid);
   color: var(--muted); display: flex; align-items: center; justify-content: center; font-size: 11px; }
 #hin { position: absolute; left: 0; top: 0; height: 100%; }
-.hc { position: absolute; top: 0; height: 34px; padding: 0 26px 0 8px; display: flex; align-items: center; gap: 4px; font-weight: 600;
+.hc { position: absolute; top: 0; height: 34px; padding: 0 8px; display: flex; align-items: center; gap: 4px; font-weight: 600;
   border-right: 1px solid var(--grid); cursor: pointer; user-select: none; }
 .hc:hover { background: var(--hover); }
 .hc .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .hc .ar { color: var(--accent); font-size: 10px; }
-.hc .sg { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); line-height: 15px; height: 20px; opacity: 0; border: 0; background: transparent; padding: 1px 4px; border-radius: 6px; color: var(--muted); font-size: 12px; }
-.hc:hover .sg, .hc .sg:focus-visible { opacity: 1; }
-.hc:hover .sg { opacity: 1; }
 .rz { position: absolute; right: -3px; top: 0; width: 7px; height: 100%; cursor: col-resize; z-index: 2; }
 .rz:hover, .rz.drag { background: var(--accent); opacity: .5; }
 .fc { position: absolute; top: 34px; height: 36px; padding: 6px 4px; box-sizing: border-box; border-right: 1px solid var(--grid); }
@@ -96,7 +93,7 @@ label.chk { display: inline-flex; align-items: center; gap: 5px; color: var(--te
 .kv { padding: 5px 12px; border-bottom: 1px solid var(--grid); cursor: pointer; }
 .kv:hover { background: var(--hover); }
 .kv .k { color: var(--muted); font-size: 11px; }
-.kv .v { font: 12px/1.45 ui-monospace, Consolas, monospace; word-break: break-all; white-space: pre-wrap; max-height: 9em; overflow: auto; }
+.kv .v { font: 12px/1.45 ui-monospace, Consolas, monospace; word-break: break-all; white-space: pre-wrap; }
 .kv.cur { background: var(--accent-bg); }
 #status { flex: none; display: flex; justify-content: space-between; gap: 12px; padding: 4px 12px; background: var(--surface); border-top: 1px solid var(--border); color: var(--text-2); font-size: 12px; }
 #status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -106,6 +103,9 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 dialog header { flex: none; padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 dialog h3 { margin: 0; font-size: 15px; }
 #dbody { padding: 8px 16px 16px; overflow: auto; flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
+dialog.wide { width: min(900px, 94vw); max-height: 86vh; }
+#cellv { margin: 8px 0 0; font: 13px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; user-select: text; }
+#cellv:empty::before { content: "(empty)"; color: var(--muted); }
 .sr { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 4px 6px; border-radius: 6px; cursor: pointer; position: relative; }
 .sr:hover { background: var(--hover); }
 .sr .val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -119,7 +119,7 @@ dialog h3 { margin: 0; font-size: 15px; }
 .fc .vp.set { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .fc input.set { border-color: var(--accent); background: var(--accent-bg); }
 .fc input.set::placeholder { color: var(--accent); }
-.kv .u { color: var(--accent); font: 11px ui-monospace, Consolas, monospace; margin-top: 2px; }
+.kv .u, #dbody .u { color: var(--accent); font: 11px ui-monospace, Consolas, monospace; margin-top: 2px; }
 .ctl { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
 .ctl input[type=search] { flex: 1; min-width: 140px; width: auto; }
 .sum { display: grid; grid-template-columns: auto 1fr; gap: 1px 12px; font-size: 12px; margin: 6px 0 4px; color: var(--text-2); }
@@ -463,7 +463,7 @@ function buildHeader() {
   t.cols.forEach((name, c) => {
     const h = document.createElement("div");
     h.className = "hc"; h.dataset.c = c; h.title = name + "\nClick: sort · drag: move · right-click: hide, move, more";
-    h.innerHTML = '<span class="nm">' + esc(name) + '</span><span class="ar"></span><span class="ty" data-c="' + c + '"></span><button class="sg" title="Column statistics (top values)" aria-label="Statistics">Σ</button><span class="rz" data-c="' + c + '"></span>';
+    h.innerHTML = '<span class="nm">' + esc(name) + '</span><span class="ar"></span><span class="ty" data-c="' + c + '"></span><span class="rz" data-c="' + c + '"></span>';
     hin.appendChild(h);
     const f = document.createElement("div");
     f.className = "fc"; f.dataset.c = c;
@@ -528,7 +528,7 @@ $("hin").addEventListener("pointerdown", e => {
   const rz = e.target.closest(".rz");
   if (!rz) {                                      // press on a header: becomes a column move once the pointer travels a few px
     const h = e.target.closest(".hc");
-    if (h && !e.target.closest(".sg, .ty")) colDrag = {c: +h.dataset.c, el: h, x0: e.clientX, sl0: $("scroller").scrollLeft, id: e.pointerId, on: false};
+    if (h && !e.target.closest(".ty")) colDrag = {c: +h.dataset.c, el: h, x0: e.clientX, sl0: $("scroller").scrollLeft, id: e.pointerId, on: false};
     return;
   }
   e.preventDefault(); e.stopPropagation();
@@ -602,11 +602,9 @@ $("hin").addEventListener("click", e => {
     if (T.sort && T.sort.c === c) T.orderKey = "?";
     layoutHeader(); trTypeChanged(c); refresh(); return;
   }
-  const sg = e.target.closest(".sg");
   const h = e.target.closest(".hc");
   if (!h) return;
   const c = +h.dataset.c;
-  if (sg) { showStats(c); return; }
   const s = T.sort;
   T.sort = !s || s.c !== c ? {c, dir: 1} : s.dir > 0 ? {c, dir: -1} : null;
   layoutHeader(); refresh();
@@ -623,13 +621,13 @@ function showColMenu(c, x, y) {
   const items = [
     ["sa", "Sort ascending", s && s.c === c && s.dir > 0], ["sd", "Sort descending", s && s.c === c && s.dir < 0], ["sx", "Clear sort", !s], null,
     ["hide", "Hide column", vis.length <= 1], ["show", "Show all hidden columns" + (nHidden ? " (" + nHidden + ")" : ""), !nHidden], ["cols", "Choose columns…"], null,
-    ["ml", "Move left", vp <= 0], ["mr", "Move right", vp >= vis.length - 1], ["mh", "Move to start", vp <= 0], ["me", "Move to end", vp >= vis.length - 1],
+    ["ml", "Move left", vp <= 0, "Ctrl+←"], ["mr", "Move right", vp >= vis.length - 1, "Ctrl+→"], ["mh", "Move to start", vp <= 0], ["me", "Move to end", vp >= vis.length - 1],
     ["mreset", "Reset column order", !orderChanged()], null,
     ["stats", "Statistics / pick values…"], ["copy", "Copy column name"],
   ];
   const m = $("cmenu");
   m.innerHTML = '<div class="mh">' + esc(t.cols[c]) + "</div>" + items.map(it => !it ? "<hr>" :
-    '<button role="menuitem" data-a="' + it[0] + '"' + (it[2] ? " disabled" : "") + ">" + esc(it[1]) + "</button>").join("");
+    '<button role="menuitem" data-a="' + it[0] + '"' + (it[2] ? " disabled" : "") + ">" + esc(it[1]) + (it[3] ? "<kbd>" + it[3] + "</kbd>" : "") + "</button>").join("");
   m.onclick = e => {
     const b = e.target.closest("button");
     if (!b || b.disabled) return;
@@ -1141,7 +1139,7 @@ $("layer").addEventListener("pointermove", e => { if (selDrag) { selDrag.last = 
 const endSel = () => { if (!selDrag) return; selDrag = null; clearInterval(dragTimer); updateSelStatus(); showDetail(); };
 $("layer").addEventListener("pointerup", endSel);
 $("layer").addEventListener("pointercancel", endSel);
-$("layer").addEventListener("dblclick", e => { if (e.target.closest(".c")) copyCell(); });
+$("layer").addEventListener("dblclick", e => { if (e.target.closest(".c")) showCell(); });
 
 function stepCol(c, d) {          // next visible column from c in display direction d (stays put at the edges)
   const t = T;
@@ -1160,7 +1158,6 @@ function fallbackCopy(s, done) {
   try { document.execCommand("copy"); done(); } catch (e) {}
   ta.remove();
 }
-function copyCell() { if (T && T.sel) copyText(cellValue(T.sel)); }
 // copy the selected block as tab-separated text (pastes into Excel / Sheets / mail as a table); a single cell is copied raw
 function copyRange(withHeader) {
   const t = T, b = rangeBox();
@@ -1187,13 +1184,21 @@ $("scroller").addEventListener("keydown", e => {
   switch (e.key) {
     case "ArrowDown": vi++; break;
     case "ArrowUp": vi--; break;
-    case "ArrowRight": c = stepCol(c, 1); break;
-    case "ArrowLeft": c = stepCol(c, -1); break;
+    case "ArrowRight": case "ArrowLeft": {
+      const d = e.key === "ArrowRight" ? 1 : -1, nb = stepCol(c, d);
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {        // Ctrl+←/→: move the selected column past its visible neighbour
+        e.preventDefault();
+        if (t.sel && nb !== c) { moveCol(c, t.pos[nb] + (d > 0 ? 1 : 0)); select(vi, c, true); }
+        return;
+      }
+      c = nb; break;
+    }
     case "PageDown": vi += page; break;
     case "PageUp": vi -= page; break;
     case "Home": if (e.ctrlKey) vi = 0; else c = firstVisCol(); break;
     case "End": if (e.ctrlKey) vi = t.nView - 1; else c = lastVisCol(); break;
     case "Enter": toggleDetail(); return;
+    case " ": if (t.sel) { e.preventDefault(); showCell(); } return;
     case "c": case "C": if (e.ctrlKey || e.metaKey) { copyRange(e.shiftKey); e.preventDefault(); } return;
     case "a": case "A":
       if (e.ctrlKey || e.metaKey) {                       // select everything in the current view
@@ -1337,6 +1342,34 @@ function showColumns() {
   $("dlg").showModal();
 }
 $("bcols").addEventListener("click", showColumns);
+// full content of the selected cell (double-click or Space); JSON values can be shown pretty-printed
+function showCell() {
+  const t = T;
+  if (!t || !t.sel) return;
+  const r = rowAt(t.sel.vi), c = t.sel.c, v = cellValue(t.sel);
+  let pretty = null;
+  if (/^\s*[\[{]/.test(v)) try { pretty = JSON.stringify(JSON.parse(v), null, 2); } catch (e) {}
+  let fmt = pretty != null;
+  $("dh").textContent = t.cols[c] + " · row " + fmtN(r + 1);
+  $("dbody").onclick = null;
+  $("dbody").innerHTML = '<div class="ctl"><button id="ccopy">Copy</button>' + (pretty != null ? '<button id="cfmt"></button>' : "") +
+    '<span class="sp"></span><span class="hint" id="cinfo" style="margin:0"></span></div>' + utcLine(c, v) + '<pre id="cellv"></pre>';
+  const show = () => {
+    $("cellv").textContent = fmt ? pretty : v;
+    if (pretty != null) $("cfmt").textContent = fmt ? "Show raw" : "Format JSON";
+  };
+  $("cinfo").textContent = fmtN(v.length) + " chars" + (v.includes("\n") ? " · " + fmtN(v.split("\n").length) + " lines" : "");
+  $("ccopy").onclick = () => copyText(v);
+  if (pretty != null) $("cfmt").onclick = () => { fmt = !fmt; show(); };
+  show();
+  $("dlg").classList.add("wide");
+  $("dlg").showModal();
+  $("dbody").scrollTop = 0;
+}
+$("dlg").addEventListener("close", () => $("dlg").classList.remove("wide"));
+$("dlg").addEventListener("keydown", e => {   // Space closes the cell view again (unless a button/field has the key)
+  if (e.key === " " && $("dlg").classList.contains("wide") && !e.target.matches("button, input, select, textarea")) { e.preventDefault(); $("dlg").close(); }
+});
 $("dx").addEventListener("click", () => $("dlg").close());
 $("dlg").addEventListener("click", e => { if (e.target === $("dlg")) $("dlg").close(); });
 
